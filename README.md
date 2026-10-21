@@ -7,6 +7,8 @@ Canvas 像素冒險。靈感來自喬治·歐威爾《一九八四》。
 免費《一九八四》短篇劇情遊戲，電腦或手機瀏覽器即可遊玩：
 https://otterbooklover.github.io/1984/
 
+訪客統計（僅管理員可見）：https://otter1984.goatcounter.com/
+
 - 手機單檔：下載 [`android.html`](./android.html)，用瀏覽器開啟
 
 操作：WASD／方向鍵、E／空白鍵、虛擬搖桿與互動鍵。右上角可切換中／英文與音樂開關。
