@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="description" content="大洋國一日——像素冒險。靈感來自喬治·歐威爾《一九八四》的原創體驗。" />
+  <title>1984</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="boot" class="overlay active title-boot">
+    <div class="title-screen" role="dialog" aria-label="標題畫面">
+      <div class="title-crt" aria-hidden="true">
+        <div class="title-glow"></div>
+        <canvas id="title-static" class="title-static" width="160" height="90"></canvas>
+        <div class="title-noise title-noise-a"></div>
+        <div class="title-noise title-noise-b"></div>
+        <div class="title-scanlines"></div>
+        <div class="title-vignette"></div>
+      </div>
+
+      <div class="title-poster" aria-hidden="true">
+        <div class="title-eye-ring">
+          <div class="title-lid"></div>
+          <div class="title-eye" id="title-eye">
+            <div class="title-pupil" id="title-pupil"></div>
+            <div class="title-glint"></div>
+          </div>
+        </div>
+        <div class="title-bb-bar">老大哥在看著你</div>
+      </div>
+
+      <button type="button" id="btn-music-title" class="title-music-btn" aria-pressed="false" title="音樂">音樂：開</button>
+
+      <div class="title-mark">
+        <div class="title-1984" aria-label="1984">
+          <span>1</span><span>9</span><span>8</span><span>4</span>
+        </div>
+        <div class="title-tag">PIXEL RPG · OCEANIA</div>
+      </div>
+
+      <div class="title-lang" role="group" aria-label="Language">
+        <button type="button" id="btn-lang-zh" class="lang-btn active" data-lang="zh" aria-pressed="true">中文</button>
+        <button type="button" id="btn-lang-en" class="lang-btn" data-lang="en" aria-pressed="false">English</button>
+      </div>
+
+      <ul class="title-slogans" aria-label="黨的口號">
+        <li>戰爭即和平</li>
+        <li>自由即奴役</li>
+        <li>無知即力量</li>
+      </ul>
+
+      <button type="button" id="btn-start" class="title-start">
+        <span class="title-start-bracket">▶</span>
+        <span class="title-start-label">開始</span>
+        <span class="title-start-blink">PRESS START</span>
+      </button>
+
+      <p class="title-hint">WASD／方向鍵移動 · E／空白鍵互動<br/>觸控：虛擬搖桿 · 互動鍵</p>
+      <p class="title-credit">靈感來自喬治·歐威爾《一九八四》</p>
+    </div>
+  </div>
+
+  <div id="play-stage">
+    <div id="game-wrap">
+      <canvas id="game" width="240" height="400"></canvas>
+      <div id="hud">
+        <button type="button" id="btn-music" class="hud-chip music-btn" aria-pressed="false" title="音樂">音樂：開</button>
+        <button type="button" id="btn-lang" class="hud-chip lang-chip" aria-label="語言：中文">語言：中文</button>
+        <div id="room-name" class="hud-chip dim">勝利大廈 · 房間</div>
+      </div>
+      <div id="interact-hint" class="hidden">按 E／互動</div>
+    </div>
+
+    <div id="ui-dock" aria-live="polite">
+      <div id="dialogue" class="ui-dock-panel">
+        <div class="dialogue-box">
+          <div id="dialogue-speaker" class="speaker"></div>
+          <div id="dialogue-text"></div>
+          <div id="dialogue-choices" class="choices"></div>
+        </div>
+      </div>
+      <div id="modal" class="ui-dock-panel">
+        <div class="panel modal-panel" id="modal-inner"></div>
+      </div>
+    </div>
+
+    <div id="controls-bar">
+      <div id="touch" class="touch on">
+        <div id="stick" class="stick" aria-label="虛擬搖桿">
+          <div id="knob" class="knob"></div>
+        </div>
+        <button type="button" id="btn-interact" class="touch-btn">互動</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="scene-fade" aria-hidden="true"></div>
+  <div id="toast" role="status"></div>
+
+  <script src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,6232 @@
+/* 大洋國一日 — Canvas 像素冒險（強化版）
+ * 靈感來自喬治·歐威爾《一九八四》。
+ */
+(() => {
+  "use strict";
+
+  const TILE = 16;
+  /* Portrait vs landscape logical view — swapped in resize() so both orientations fill the phone */
+  const VW_PORT = 240, VH_PORT = 400;
+  const VW_LAND = 400, VH_LAND = 225;
+  let VW = VW_PORT, VH = VH_PORT;
+  const SPEED = 1.7 * (2 / 3);
+  const STICK_DEAD = 0.2;
+
+  const C = {
+    floor: "#3a3d42", floor2: "#34373c", floor3: "#3e4248",
+    wall: "#1e2226", wallTop: "#2a3036", wallBrick: "#252a30",
+    carpet: "#4a3a3a", olive: "#5a6b3a",
+    red: "#c62828", redDark: "#7a1818",
+    skin: "#c4a484", hair: "#2a2a2a",
+    shirt: "#3a4a6a", pants: "#2a3548",
+    screen: "#6a8a6a", paper: "#d8d0c0",
+    black: "#0a0a0a", white: "#e8eaed",
+    wood: "#6b4f3a", woodLite: "#8a6a4a",
+    metal: "#6a7078", warn: "#e53935",
+    rain: "#5a6a7a", glow: "#8fce8f",
+    gin: "#c8d8a8", cig: "#d4a574",
+    steam: "rgba(200,200,200,.25)",
+    grass: "#3d5a2e", grass2: "#4a6b38", grass3: "#2f4a24",
+    sky: "#6a7a88", skyLite: "#8a9aaa",
+  };
+
+  const canvas = document.getElementById("game");
+  canvas.width = VW;
+  canvas.height = VH;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+
+  const state = {
+    lang: "zh",
+    name: "溫斯頓",
+    room: "apartment",
+    flags: {
+      dimmedScreen: false,
+      lobbySeen: false,
+      leftApartment: false,
+      postersRead: 0,
+      posterOrder: [],
+      newsFixed: 0,
+      carrying: null,
+      hateDone: false,
+      hateChoice: null,
+      newspeakDone: false,
+      diaryDone: false,
+      diaryChoice: null,
+      junkshopDone: false,
+      secretRoomDone: false,
+      brotherhoodDone: false,
+      screenOffShock: false,
+      doublethinkDone: false,
+      room101Done: false,
+      cafeDone: false,
+      broken: false,
+      choiceFlavor: {},
+      met: {},
+      chocolateAnnounced: false,
+      noteSlipped: false,
+      juliaCanteen: false,
+      juliaSquare: false,
+      obrienGlance: false,
+      meadowDone: false,
+      juliaNamed: false,
+      arrested: false,
+      pictureFallen: false,
+      bookReadDone: false,
+      policeInRoom: false,
+      prolePubTalked: false,
+      miniluvDone: false,
+    },
+    betray: { active: false, phase: "idle", t: 0, dropY: 0, cops: [] },
+    paused: false,
+    interactNear: null,
+    wallHeadline: "生產超標 12%",
+    tick: 0,
+    /* Room 101 cinematic: light 0=black → 1=full; then dialogue */
+    room101Reveal: { active: false, light: 0, duration: 220, sfxAt: 0, done: false },
+    hateCut: { active: false, phase: "idle", tx: 0, ty: 0 },
+  };
+
+  try {
+    if (sessionStorage.getItem("oceania-broken") === "1") {
+      state.flags.broken = true;
+    }
+  } catch (_) {}
+
+
+  /* ---- i18n (zh / en) ---- */
+  try {
+    const savedLang = localStorage.getItem("oceania-lang");
+    if (savedLang === "en" || savedLang === "zh") state.lang = savedLang;
+  } catch (_) {}
+
+  const EN = {"了":"","你":"You","和":"and","在":"at","對":"to","床":"Bed","很":"very","我":"I","是":"is","有":"have","的":"","與":"and","門":"Door","互動":"Interact","五。":"Five.","人群":"Crowd","今日":"today","僕人":"Servant","厚書":"Thick book","同事":"Colleague","四。":"Four.","回聲":"Echo","天空":"Sky","女侍":"Barmaid","婦女":"Woman","孩子":"Child","小徑":"Path","抽屜":"Drawer","新語":"Newspeak","有啲":"a bit","有點":"a bit","桌角":"Table corner","棋盤":"Chessboard","樓梯":"Stairs","樹蔭":"Tree shade","橫幅":"Banner","櫥窗":"Shop window","氣味":"Smell","火焰":"Flame","牆縫":"Wall crack","男人":"Man","積水":"Puddle","空牆":"Bare wall","系統":"System","紙條":"Note","終局":"The end","終點":"The end","繼續":"Continue","老人":"Old man","賽麥":"Syme","遠樹":"Distant trees","酒桶":"Cask","野花":"Wildflowers","銘牌":"Plaque","鋸末":"Sawdust","鏢靶":"Dartboard","門廳":"Hall","電幕":"Telescreen","黏桌":"Sticky table","點頭":"Nod","仇恨！":"Hate!","低下頭":"Bow your head","刻度盤":"Dial","勝利！":"Victory!","咖啡館":"Café","奧勃良":"O'Brien","小英雄":"Junior Spy","年輕人":"Young man","後樓梯":"Back stairs","想追問":"Ask further","我懷疑":"I doubt","扶手椅":"Armchair","操縱桿":"Lever","效忠！":"Loyalty!","朱莉亞":"Julia","標語牌":"Slogan board","派遜斯":"Parsons","溫斯頓":"Winston","無影燈":"Harsh lamp","紀錄部":"Records Department","舊版畫":"Old print","葡萄酒":"Wine","角落桌":"Corner table","解釋乙":"Interpretation B","解釋甲":"Interpretation A","記憶洞":"Memory hole","詞彙員":"Lexicographer","巡邏員":"Patrolman","配給簿":"Ration book","酒瓶架":"Bottle rack","雙人床":"Double bed","……五。":"…Five.","（無詞）":"(no words)","仇恨結束":"Hate ends","仇恨螢幕":"Hate screen","你是誰？":"Who are you?","停擺的鐘":"Stopped clock","再看一眼":"Look again","前線大捷":"Front-line victory","勝利廣場":"Victory Square","只好調暗":"Dim it instead","城外草原":"Meadow outside the city","多看一眼":"Look longer","巨型電幕":"Giant telescreen","思想警察":"Thought Police","我愛你。":"I love you.","新語終端":"Newspeak terminal","牆上標題":"Wall headline","牆上的臉":"The face on the wall","珊瑚鎮紙":"Coral paperweight","生產達標":"Production on target","看他關掉":"Watch him switch it off","移開視線":"Look away","積灰貨架":"Dusty shelves","窗外星象":"View beyond the window","約束長椅":"Restraint bench","綠光……":"Green light…","試著關掉":"Try to switch it off","調暗亮度":"Dim the brightness","走廊氣味":"Corridor smell","部內食堂":"Canteen","鄰桌對話":"Next table","配給上調":"Rations raised","金屬餐盤":"Metal tray","鐵籠裝置":"Wire cage","音樂：開":"Music: On","音樂：關":"Music: Off","食堂標語":"Canteen slogan","食堂職員":"Canteen clerk","黑髮姑娘":"Dark-haired girl","你已被觀察":"YOU ARE BEING WATCHED","你後悔嗎？":"Do you regret it?","假裝沒看見":"Pretend not to see","勝利牌香煙":"Victory cigarettes","另一個孩子":"Another child","壞掉的電梯":"Broken lift","奧勃良寓所":"O'Brien's flat","我恨老大哥":"I hate Big Brother","我愛老大哥":"I love Big Brother","戰爭即和平":"WAR IS PEACE","房 101":"Room 101","打倒敵人！":"Down with the enemy!","新聞紙 A":"News scrap A","新聞紙 B":"News scrap B","新聞紙 C":"News scrap C","新聞紙 D":"News scrap D","新語終端室":"Newspeak terminal room","查林頓先生":"Mr Charrington","栗樹咖啡館":"Chestnut Tree Café","桌上的鎮紙":"Paperweight on the table","沉默的男人":"Silent man","派遜斯太太":"Mrs Parsons","無知即力量":"IGNORANCE IS STRENGTH","牆在顫……":"The wall is trembling…","破鼻的男人":"Broken-nosed man","老大哥海報":"Big Brother poster","自由即奴役":"FREEDOM IS SLAVERY","記住這張臉":"Remember this face","跟著人群喊":"Shout with the crowd","什麼叫自由？":"What is freedom?","伸手扶住畫框":"Steady the picture frame","出口鬆動了。":"The way out has loosened.","前線失利傳聞":"Rumour of a front-line setback","我什麼都不想":"I want nothing","查林頓舊貨鋪":"Charrington's junk shop","樓梯在後面。":"The stairs are at the back.","歷史一向如此":"History has always been thus","空眼神的男人":"Hollow-eyed man","自己伸手去關":"Switch it off yourself","詞彙第十一版":"Eleventh Edition vocabulary","跟上他的目光":"Meet his gaze","這太危險了。":"This is too dangerous.","通往無產者區":"To the prole quarter","雙重思想門廳":"Doublethink lobby","……茱莉亞……":"…Julia…","二加二等於幾？":"What is two plus two?","你還想問什麼？":"What else do you want to ask?","兩分鐘仇恨開始":"Two Minutes Hate begins","勝利牌杜松子酒":"Victory gin","去年承諾未兌現":"Last year's promise unmet","只是進來避雨。":"Just coming in from the rain.","四。永遠是四。":"Four. Always four.","巧克力配給減少":"Chocolate ration reduced","現在——看我。":"Now—look at me.","紙灰還在縫裡。":"Ash still in the crack.","聖克萊門特版畫":"St Clement's engraving","記得。奧勃良。":"I remember. O'Brien.","那戰爭之前呢？":"And before the war?","開啟音樂與音效":"Unmute music and sound","關閉音樂與音效":"Mute music and sound","……別盯著我看。":"…Don't stare at me.","……愛。愛。愛。":"…Love. Love. Love.","……房 101。":"…Room 101.","下一步該怎麼辦？":"What should we do next?","也好。先顧我們。":"Fine. Us first.","也許他是自己人。":"Perhaps he is one of us.","他們一直看著……":"They've always been watching…","叩、叩——鐵靴。":"Knock, knock—iron boots.","只翻到中間就合上":"Close it halfway through","右門 · 解釋乙":"Right door · Interpretation B","左門 · 解釋甲":"Left door · Interpretation A","很好。你明白了。":"Good. You understand.","懷疑她是思想警察":"Suspect she is Thought Police","我只想聽你說話。":"I only want to hear you speak.","把他們撕成碎片！":"Tear them to pieces!","標語：戰爭即和平":"Slogan: WAR IS PEACE","標語：無知即力量":"Slogan: IGNORANCE IS STRENGTH","標語：自由即奴役":"Slogan: FREEDOM IS SLAVERY","為老大哥！為黨！":"For Big Brother! For the Party!","生產超標 12%":"Production +12%","看螢幕。別看人。":"Watch the screen. Not people.","紀錄部 · 隔間":"Records Department · Cubicle","聽說樓上有房間？":"I hear there's a room upstairs?","記憶洞還在喘氣。":"The memory hole is still breathing.","讀「無知即力量」":"Read 'IGNORANCE IS STRENGTH'","走吧。門在前面。":"Go. The door is ahead.","這條路暫時不通。":"This way is closed for now.","這裡真的安全嗎？":"Is it truly safe here?","那顆珊瑚鎮紙……":"That coral paperweight…","門在身後合上了。":"The door closed behind you.","……別再看那張紙。":"…Don't look at that paper again.","……夠了。繼續看。":"…Enough. Keep looking.","仇恨！仇恨！仇恨！":"Hate! Hate! Hate!","你知道自己在哪裏。":"You know where you are.","別把這裡當成懲罰。":"Don't take this for punishment.","別提他。先顧我們。":"Don't mention him. Us first.","勝利大廈 · 房間":"Victory Mansions · Flat","勝利大廈 · 走廊":"Victory Mansions · Corridor","勝利大廈 · 門廳":"Victory Mansions · Lobby","友愛部 · 刑訊室":"Ministry of Love · Interrogation","哦？消息傳得真快。":"Oh? News travels fast.","回來了。書讀完了？":"You're back. Finished the book?","完成 · 離開終端":"Done · Leave terminal","很好。你還能說話。":"Good. You can still speak.","思想罪！外黨的蛆！":"Thoughtcrime! Outer Party vermin!","思想罪。你們完了。":"Thoughtcrime. You're finished.","我們還能再見面嗎？":"Can we meet again?","無產者區 · 酒館":"Prole quarter · Pub","紙條……是你寫的？":"The note… did you write it?","美妙極了。不是嗎？":"Wonderful. Isn't it?","老大哥萬歲！萬歲！":"Long live Big Brother! Long live!","說。二加二等於幾？":"Say it. What is two plus two?","讀戰爭如何維持和平":"Read how war sustains peace","酒已經備好。請坐。":"The wine is ready. Sit.","……那就聽一會兒風。":"…Then listen to the wind a while.","他的目光落在電幕上。":"His gaze settles on the telescreen.","對你而言——是老鼠。":"For you—rats.","對對對。紙永遠正確。":"Yes, yes. Paper is always correct.","我……需要一點時間。":"I… need a little time.","我不信。這太危險了。":"I don't believe it. Too dangerous.","打倒敵人！打倒叛徒！":"Down with the enemy! Down with traitors!","有沒有更安全的地方？":"Is there somewhere safer?","樓上的灰塵還沒踩過。":"The dust upstairs hasn't been trodden yet.","湯是灰的。日子也是。":"The soup is grey. So are the days.","舊貨鋪 · 樓上房間":"Junk shop · Upstairs room","袖口裡掉出一角紙屑。":"A scrap of paper slips from a sleeve.","誰不同仇誰就是敵人！":"Whoever does not hate is the enemy!","讓他流血！讓他懺悔！":"Make him bleed! Make him confess!","酒。為過去。為將來。":"Wine. To the past. To the future.","間諜！敗類！髒東西！":"Spy! Scum! Filth!","不知道，是誠實的開始。":"Not knowing is the start of honesty.","你們還記得資本主義嗎？":"Do you still remember capitalism?","勝利大廈 · 夜晚房間":"Victory Mansions · Night flat","叛徒！我們在玩抓間諜！":"Traitor! We're playing catch-the-spy!","從前……是不是比較好？":"Before… was it better?","我不知道——我不知道！":"I don't know—I don't know!","接下來呢？你想怎麼辦？":"And next? What do you want to do?","無產者為什麼不管政治？":"Why don't the proles care about politics?","舊貨鋪——記住這條路。":"The junk shop—remember this way.","請稍候。主人很快就來。":"Please wait. The master will be here shortly.","讀完了。句子還在發燙。":"Finished. The sentences still burn.","避雨也好。鋪子不趕客。":"Shelter from rain is fine. The shop doesn't hurry anyone out.","（合上書）該回那間房了。":"(Closing the book) Time to go back to that room.","不過——這裡還不是終點。":"But—this is not the end yet.","也許。也許不是。只能試。":"Perhaps. Perhaps not. We can only try.","二加二等於四，且只等於四":"Two plus two equals four, and only four","你改得乾淨。黨喜歡乾淨。":"You corrected it cleanly. The Party likes clean.","出去吧。其餘的會來找你。":"Go. The rest will find you.","它們餓了。你還能撐多久？":"They're hungry. How long can you last?","我宣誓。無論要我做什麼。":"I swear. Whatever you ask of me.","戰爭即和平！自由即奴役！":"War is peace! Freedom is slavery!","把愛國的唾沫吐到他臉上！":"Spit your patriotism into his face!","效忠！效忠！效忠老大哥！":"Loyalty! Loyalty! Loyalty to Big Brother!","樓上從來沒有真正安靜過。":"Upstairs was never truly quiet.","無知即力量！無知即力量！":"Ignorance is strength! Ignorance is strength!","牆上的字，一個也不能漏。":"Not one word on the wall may be missed.","當然！黨永遠正確。哈哈！":"Of course! The Party is always right. Ha!","紙還捏在手裡。邊緣發燙。":"The paper is still in your hand. The edges burn.","老大哥。老大哥。老大哥。":"Big Brother. Big Brother. Big Brother.","草原之後，我一直在想你。":"Since the meadow, I've been thinking of you.","讀完再來。我會在這裡等。":"Come back when you've read it. I'll wait here.","電幕的綠光還咬著你的背。":"The telescreen's green light still bites your back.","（慘叫）我不——我不知道！":"(Screaming) I don't—I don't know!","（極輕）……眼淚有什麼用。":"(Barely audible) …What use are tears.","先讓我們有一點真正的安靜。":"First let us have a little real quiet.","只剩酒味。酒味比記憶老實。":"Only the taste of drink left. Drink is more honest than memory.","哈哈！你這話聽起來像讚美。":"Ha! That almost sounds like praise.","巧克力配給？上週明明減過。":"Chocolate ration? It was cut only last week.","廣場有眼睛。城外——也許。":"The square has eyes. Outside the city—perhaps.","後悔？後悔要記得才能後悔。":"Regret? You need memory to regret.","我今日對公布的數字有點懷疑":"I rather doubt the figures published today","我們從前……不。沒有從前。":"We used to… No. There is no used to.","拒絕只是另一種形式的抵達。":"Refusal is only another form of arrival.","有個人……內黨的。去找他。":"There's someone… Inner Party. Go to him.","現在——選一句話。說出來。":"Now—choose a sentence. Speak it.","綠光從牆後露出。它一直在。":"Green light shows through the wall. It was always there.","自由？那詞兒太貴。買不起。":"Freedom? That word's too dear. Can't afford it.","走廊那頭有人潮湧動的聲音。":"Down the corridor comes the sound of a crowd surging.","金氏的嘴臉——看啊！看啊！":"Goldstein's face—look! Look!","電幕變暗了——但沒有關掉。":"The telescreen dimmed—but it did not go off.","（他推了推眼鏡，語氣客氣。）":"(He adjusts his spectacles, polite.)","（低聲）仇恨過後，別急著走。":"(Softly) After the Hate, don't hurry away.","不要碰我——她才該承受這個！":"Don't touch me—she should take this!","二加二等於五——若黨如此需要":"Two plus two equals five—if the Party needs it so","你來了。這裡聽不見——暫時。":"You're here. They can't hear—for now.","你背叛了她。這才是最後的課。":"You betrayed her. That is the final lesson.","例如：我對公布的數字有點懷疑":"e.g. I rather doubt the published figures","小說部的。寫機器小說的那種。":"Fiction Department. The machine-novels kind.","很好。嘴巴先到了。心會跟上。":"Good. The mouth arrived first. The heart will follow.","權力不是手段。權力就是目的。":"Power is not a means. Power is an end.","洞口呼著熱風。紙邊會捲起來。":"The hole breathes hot air. Paper edges curl.","生產數字要對。對了就是真的。":"The production figures must be right. Right means true.","畫框微微晃了一下。也許是風。":"The frame trembles slightly. Perhaps the wind.","當然危險。整個大洋國都危險。":"Of course it's dangerous. All of Oceania is dangerous.","答不上來，或許就是他們要的。":"Not being able to answer may be exactly what they want.","記憶是靠不住的。紙才靠得住。":"Memory is unreliable. Paper can be trusted.","記錄員注意：勿銷毀正確檔案。":"Clerk note: do not destroy correct files.","錯。暫時錯。我們有的是時間。":"Wrong. Temporarily wrong. We have all the time we need.","……我也是。草葉還黏在鞋底呢。":"…So have I. Grass still stuck to my soles.","（忽然微笑）今天的雨，很正確。":"(Suddenly smiling) Today's rain is very correct.","人群還沒散。巨型電幕仍在低鳴。":"The crowd hasn't dispersed. The giant telescreen still hums.","你走路的樣子像外黨的！哈哈哈！":"You walk like Outer Party! Hahaha!","分開走。別一起出現在電幕底下。":"Go separately. Don't appear together under a telescreen.","別把勺子敲太響。敲響會像抗議。":"Don't clatter the spoon. Noise can sound like protest.","句柄已歸檔。詞彙庫又瘦了一圈。":"Phrase archived. The vocabulary has thinned again.","對她做吧！不要對我——懲罰她！":"Do it to her! Not to me—punish her!","廣場上不能說。所以才有這片草。":"Can't speak in the square. That's why this grass exists.","我們帶你來這裡，是為了治好你。":"We brought you here to cure you.","我連自己年輕時的臉都想不起來。":"I can't even recall my own young face.","政治？那是黨的事。我們管肚子。":"Politics? That's Party business. We mind our stomachs.","昨天的標題？不存在。從未存在。":"Yesterday's headline? It never existed. Never.","無產者的記憶像酒——喝完就淡。":"Prole memory is like drink—gone pale when finished.","版畫在動。別裝看不見。去碰它。":"The engraving is moving. Don't pretend you don't see. Touch it.","記住這種感覺。它比真實更有用。":"Remember this feeling. It is more useful than truth.","誰要是不喊口號，誰就是思想犯！":"Whoever will not shout the slogans is a thought-criminal!","課已經上完。前方是房 101。":"The lesson is finished. Ahead is Room 101.","酒在這兒。問別的，我一概不知。":"Drink's here. Ask anything else and I know nothing.","重要的是——我不是他們派來的。":"What matters is—I wasn't sent by them.","鎖還扣著。也許白天過完再回來。":"Still locked. Perhaps come back when the day is done.","門在對面打開。白光更白了一點。":"The door opposite opens. The white light whitens further.","關不掉。走廊那頭有煮菜的氣味。":"Can't switch it off. Cooking smells from down the corridor.","靴跟與石板撞擊。你不敢再抬頭。":"Boot-heels strike the stone. You dare not look up again.","『老大哥在看著你。』字比人還高。":"'BIG BROTHER IS WATCHING YOU.' Letters taller than a man.","仇恨過後，生產數字總會好看一點。":"After the Hate, the figures always look a little better.","你真幸福。幸福到幾乎不需要語言。":"You are truly happy. Happy enough almost to need no words.","兄弟會——如果你相信它存在的話。":"The Brotherhood—if you believe it exists.","可別相信『永遠』。永遠是黨的詞。":"Don't believe in 'forever'. Forever is a Party word.","她轉身走入樹影。草原又只剩風聲。":"She turns into the tree-shadow. Only wind left on the meadow.","對。像普通人拜訪上級那樣去找他。":"Yes. Go to him as an ordinary man visiting a superior.","我只記得鞋底的洞，同現在差不多。":"I only remember holes in my soles—much like now.","手銬很冷。走廊外的雨聲斷了一下。":"The cuffs are cold. Rain outside the corridor breaks for a moment.","把錯誤丟進記憶洞。別多看第二眼。":"Drop the error into the memory hole. Don't look twice.","書呢？先回家讀。別急著碰那幅畫。":"The book? Go home and read first. Don't rush that picture.","樓梯在後面。小心一點，階梯舊了。":"Stairs at the back. Careful—the steps are old.","沒有反應。角落的紅點更亮了一點。":"No response. The red dot in the corner brightens a little.","現在我們可以說話了。外面聽不見。":"Now we can speak. Outside can't hear.","白髮與和善的皺紋像面具一樣卸下。":"White hair and kindly wrinkles drop away like a mask.","眼鏡反光一瞬。他似乎也看見了你。":"A flash on his spectacles. He seems to have seen you too.","籠子移開一瞬。空氣重新進入肺葉。":"The cage draws back an instant. Air returns to the lungs.","說話很好。說話代表你還能被改寫。":"Speaking is good. Speech means you can still be rewritten.","資本主義？那詞像舊報紙上的蟲洞。":"Capitalism? That word is like a worm-hole in old newsprint.","鑰匙……嗯，你若要，樓梯在後面。":"The key… well, if you want it, stairs are at the back.","門還鎖著。奧勃良說：課還沒上完。":"Still locked. O'Brien said: the lesson isn't finished.","……棋子移動時，他的眼睛沒有跟上。":"…When the piece moved, his eyes did not follow.","（聲音忽然變硬，不再溫吞。）別動。":"(Voice suddenly hard, no longer mild.) Don't move.","今日份額已完成。螢幕改播豐收讚歌。":"Today's quota is done. The screen switches to harvest hymns.","他們要的是孤獨。孤獨的人最好統治。":"What they want is loneliness. Lonely people are easiest to rule.","他沒說話。目光只在你臉上停了一瞬。":"He said nothing. His gaze rested on your face only a moment.","他站在你面前。鐵籠的輪廓貼近面門。":"He stands before you. The outline of the wire cage closes on your face.","可親密在大洋國活不長。我們得加快。":"But intimacy does not live long in Oceania. We must hurry.","可風也會停。我們需要一扇真正的門。":"But wind stops too. We need a real door.","她側過身，消失在舉著拳頭的人群裡。":"She turns aside and vanishes among raised fists.","它仍然黑著。房間安靜得不像大洋國。":"It stays dark. The room is quiet in a way Oceania never is.","手別抖。抖會讓墨水寫出多餘的歷史。":"Don't let your hand shake. Shaking writes surplus history in ink.","拒絕？嘴上這麼說也好。心已經到了。":"Refuse? Fine to say so aloud. The heart has already arrived.","服從被說成自由。走廊燈管嗡嗡作響。":"Obedience is called freedom. Corridor tubes hum.","標語看完了？進去吧。紀錄部不等人。":"Finished the slogans? Go in. Records doesn't wait.","洞吞得很快。紙片落下去時沒有聲音。":"The hole swallows quickly. Paper falls without a sound.","燈光很白。空氣裡有鐵與潮濕的氣味。":"The light is very white. Iron and damp in the air.","終端的綠字還在閃。詞還沒被削乾淨。":"Green text still blinks on the terminal. Words not yet pared clean.","老大哥在看著你——我們也在看著你！":"Big Brother is watching you—and so are we!","胃裡發燙。電幕的綠光忽然變得刺眼。":"Heat in the stomach. The telescreen's green light suddenly stings.","能。但不要在部裡。不要在勝利大廈。":"Yes. But not in the Ministry. Not in Victory Mansions.","臉都洗不乾淨。肥皂配給又薄了一層。":"Can't get the face clean. Soap ration thinner again.","舊貨鋪樓上。查林頓先生會借你鑰匙。":"Above the junk shop. Mr Charrington will lend you the key.","草葉還在顫。有人在樹影裡等你說話。":"Grass still trembling. Someone in the tree-shadow waits for you to speak.","衝突被說成安定。你讀完，仍須點頭。":"Conflict is called order. When you've read it, you must still nod.","記得錯開腳步。並肩是給死人用的詞。":"Remember to stagger your steps. Side-by-side is a word for the dead.","說錯了也沒關係——他們會教你說對。":"Wrong words don't matter—they will teach you the right ones.","路已經指給你了。其餘的會來找你。":"The road has been pointed out. The rest will find you.","門在外頭。像普通人拜訪上級那樣去。":"The door is outside. Go as an ordinary man visiting a superior.","鼻子歪了。聲音像從很遠的地方傳來。":"Nose crooked. Voice as if from a great distance.","「無知即力量。」句子像釘子敲進額角。":"'IGNORANCE IS STRENGTH.' The sentence drives into the brow like a nail.","不對。或許是能說真話。可真話是什麼？":"No. Or perhaps being able to speak truth. But what is truth?","今天份量『正確』。正確比好吃更重要。":"Today's portion is 'correct'. Correct matters more than taste.","他曾經是黨內的人。現在只喝杜松子酒。":"He used to be Party. Now he only drinks gin.","他的鞋子還在門外。我們拿來當戰利品。":"His shoes are still outside. We took them as trophies.","你忽然發現：恐懼比忠誠更快抵達終點。":"You suddenly find: fear reaches the end faster than loyalty.","你聽見自己說出那句話。棋子沒有移動。":"You hear yourself speak the words. The chessman does not move.","信任是奢侈品。我們今天已經花掉一份。":"Trust is a luxury. We've spent today's portion already.","兩扇門都還暗著。同一句話，兩種真實。":"Both doors still dark. One sentence, two truths.","別看籠子。看我。說出你真正想說的話。":"Don't look at the cage. Look at me. Say what you truly mean.","前線永遠存在，好讓和平永遠成為口號。":"The front exists forever so that peace may forever be a slogan.","口號衝出喉嚨。他仍站在那裡，像石像。":"Slogans burst from the throat. He still stands there like stone.","哈哈！今日配給又調高了——報紙說的。":"Ha! Today's ration raised again—so the paper says.","她已經走入人群。紅帶子一閃就消失了。":"She's gone into the crowd. A flash of red sash, then nothing.","廣場仇恨裡他看過你一眼。別裝不記得。":"In the Square Hate he glanced at you. Don't pretend you forget.","我受不了……把籠子轉向別人！轉向她！":"I can't bear it… turn the cage on someone else! On her!","我叫朱莉亞。連危險裡也該有個真名字。":"My name is Julia. Even in danger one should have a real name.","把酒喝了。記住這安靜——它不會長久。":"Drink. Remember this quiet—it will not last.","拿了書也好，沒拿到也好——路會打開。":"Book or no book—the road will open.","日記鎖在裡面。電幕音量似乎高了一格。":"The diary is locked inside. The telescreen seems a notch louder.","書合上了。你仍覺得有人在頁縫裡呼吸。":"The book is closed. You still feel breath between the pages.","眼鏡後的眼睛停了一瞬，像在確認什麼。":"Eyes behind spectacles pause an instant, as if confirming something.","等你真正知道的時候，答案會只有一個。":"When you truly know, there will be only one answer.","腰間的紅帶子刺眼。你告訴自己：危險。":"The red sash at her waist stings the eye. You tell yourself: danger.","裝置已收起。空氣裡有咖啡與雨的味道。":"The apparatus is put away. Coffee and rain in the air.","鈴快響了。廣場那邊的螢幕比這裡更大。":"The bell will ring soon. The screen at the Square is larger than here.","電幕還亮著。若要說話，請等主人指示。":"The telescreen is still on. If you would speak, wait for the master's word.","（他轉向巨型電幕，像什麼也沒發生過。）":"(He turns to the giant telescreen as if nothing happened.)","（極輕地點了點頭，隨即轉身沒入人群。）":"(A bare nod, then he turns and melts into the crowd.)","二加二等於五。你說對了嗎？說對了就好。":"Two plus two equals five. Did you say it right? Good if you did.","仇恨已經結束。內黨的人不會在廣場久留。":"The Hate is over. Inner Party men don't linger in the Square.","他若給你酒，就喝。他若給你書，就帶走。":"If he offers wine, drink. If he offers a book, take it.","你們來，是為了加入我們——為了兄弟會。":"You came to join us—for the Brotherhood.","內黨的人站在人群邊緣。寬肩，眼鏡微閃。":"An Inner Party man at the crowd's edge. Broad shoulders, spectacles flashing.","兩分鐘仇恨要開始了吧？廣場上人可多了。":"Two Minutes Hate about to start, eh? Crowded in the Square.","別問我怎麼知道。知道太多的人，活不久。":"Don't ask how I know. People who know too much don't live long.","別在電幕底下練習微笑。微笑也會被記錄。":"Don't practise smiling under a telescreen. Smiles are recorded too.","勝利大廈 · 房間（讀《兄弟團》之書）":"Victory Mansions · Flat (reading the Brotherhood book)","喜歡就多看一會兒。樓上還有更靜的地方。":"Look longer if you like. Quieter still upstairs.","她的目光很快移開。袖口裡似乎有一角紙。":"Her eyes flick away. A corner of paper seems to show in her cuff.","我跟著你上來的。別緊張——這裡聽不見。":"I followed you up. Don't be nervous—they can't hear here.","所以你問『從前好不好』——我答不上來。":"So you ask if 'before' was better—I can't answer.","新語第十一版快印好了。詞彙會再瘦一圈。":"Newspeak Eleventh Edition nearly printed. Vocabulary thins again.","木頭階梯吱呀作響。上面沒有電幕的綠光。":"Wooden steps creak. No green telescreen light above.","樓上還開著。紙鎮也還在。要什麼自己挑。":"Upstairs still open. Paperweight still there. Take what you like.","樓梯口堆著紙箱。店主還沒提起樓上的事。":"Cartons stacked at the stair. The shopkeeper hasn't mentioned upstairs yet.","無產者區的巷口擠滿了人。仇恨還沒結束。":"The prole alley mouth is packed. The Hate isn't over.","照常生活。適當的時候，其餘的會來找你。":"Live as usual. When the time is right, the rest will find you.","燈光淡去。雨聲與咖啡的氣味慢慢滲進來。":"The light fades. Rain and coffee seep slowly in.","猶豫也無妨。路只有一條，你終會走上來。":"Hesitation is allowed. There is only one road; you will take it.","珊瑚鎮紙也一併看著玩。顏色像從前的海。":"Look at the coral paperweight too. Colour like the sea of before.","空洞裡長出一句現成的話。棋子沒有移動。":"A ready-made sentence grows in the hollow. The chessman does not move.","舊貨鋪在等。草葉會忘掉今天——人不會。":"The junk shop waits. Grass will forget today—people will not.","若有人問，你只是去買舊茶杯。茶杯無罪。":"If asked, you only went to buy an old teacup. Teacups are innocent.","詞愈少，想得愈窄。這不是缺陷，是設計。":"Fewer words, narrower thought. Not a flaw—a design.","賽麥那桌話多。話多的人，字典會先瘦他。":"Syme's table talks too much. Dictionaries thin such men first.","走的時候把領口拉好。像什麼都沒發生過。":"When you leave, straighten your collar. As if nothing happened.","走路別東張西望。眼睛是用來看老大哥的。":"Don't look about as you walk. Eyes are for looking at Big Brother.","過去……過去像酒。喝完就忘。忘完又渴。":"The past… the past is like drink. Finish and forget. Forget and thirst again.","電幕：本週巧克力配給——上調至二十克。":"Telescreen: this week's chocolate ration—raised to twenty grams.","（合上書）原來一切都寫好了——包括我們。":"(Closing the book) So everything was already written—including us.","（極輕地——也許只是錯覺——點了點頭。）":"(Very slightly—perhaps only imagined—he nods.)","二加二等於五。你會看見它——像看見太陽。":"Two plus two equals five. You will see it—as you see the sun.","你聽見自己說「五」，像在背誦別人的喉嚨。":"You hear yourself say 'five', as if reciting someone else's throat.","午餐鈴響之前，把最後一則『錯誤』送進去。":"Before the lunch bell, send the last 'error' in.","奧勃良塞給你的書躺在那裡。書脊沒有標題。":"The book O'Brien gave you lies there. No title on the spine.","恐懼證明你還清醒。清醒的人，我們更需要。":"Fear proves you are still awake. The awake are whom we need most.","抽屜縫裡還透著紙的氣味。紙上的字還熱著。":"Paper smell still seeps from the drawer crack. The words still hot.","有些章節像鏡子：你看見自己如何改寫昨天。":"Some chapters are mirrors: you see how you rewrite yesterday.","樓梯口像被什麼堵住了。房間忽然變得很小。":"Something seems to block the stair. The room suddenly shrinks.","權力不是為了守住什麼。權力就是目的本身。":"Power is not to preserve anything. Power is the end itself.","現在——分開。你先回城，去那家鋪子看看。":"Now—separate. You go back to town first; look at that shop.","畫框在顫。灰塵落下來。後面……好像有光？":"The frame trembles. Dust falls. Behind… is that light?","疼痛是教育。它比語言更快抵達正確的地方。":"Pain is education. It reaches the correct place faster than language.","皮帶勒進腕骨。你被鎖在鐵椅上，動彈不得。":"Straps bite the wrist-bones. Locked in the iron chair, you cannot move.","籠門的插銷輕輕一響。溫熱的氣息噴在臉上。":"The cage latch clicks softly. Warm breath sprays your face.","老闆、工廠、星期天……星期天是什麼來著？":"Bosses, factories, Sunday… what was Sunday again?","雲層薄得不真實。你幾乎忘記廣場上的喧囂。":"Clouds thin to unreality. You almost forget the Square's roar.","（合上書）回去。那間「沒有電幕」的房間……":"(Closing the book) Go back. That room 'without a telescreen'…","一小簇藍花。她說過：在大洋國，這也算奢侈。":"A small cluster of blue flowers. She said: in Oceania, even this is luxury.","不問被說成強大。電梯口仍貼著『暫停服務』。":"Not asking is called strength. 'Out of service' still stuck by the lift.","他們說：勝利。勝利。勝利。酒卻愈來愈難喝。":"They say: Victory. Victory. Victory. The drink grows harder to swallow.","他看著窗外的雨，嘴唇動了一下，什麼也沒說。":"He watches rain beyond the window, lips move, say nothing.","你同時點了頭。門軸鬆動。前方是房 101。":"You nodded to both at once. The hinge loosens. Ahead is Room 101.","你把視線釘回電幕。口號的餘音還在廣場迴盪。":"You pin your eyes back to the telescreen. Slogan echoes still ring the Square.","你讀到內黨如何把真實磨成粉末，再重新澆鑄。":"You read how the Inner Party grinds truth to powder and casts it anew.","先把話說完。電幕還亮著——或者，該關掉它。":"Finish speaking first. The telescreen is still on—or should be switched off.","別把紙帶回家。電幕會讀你的臉，比讀字更快。":"Don't take the paper home. The telescreen reads faces faster than words.","南面有一條窄巷。人群還堵著，暫時走不過去。":"A narrow alley to the south. Crowd still blocks it; cannot pass yet.","厚書還攤在桌上。紙頁的氣味比杜松子酒更刺。":"The thick book still lies open. Page-smell sharper than gin.","可牲口至少還記得草地。我們連草地都說不清。":"But beasts at least remember grass. We can't even name the grass.","媽媽說：看見可疑的人，就要報告。你可疑嗎？":"Mum says: report anyone suspicious. Are you suspicious?","孩子們可熱心了，都是小英雄。我以他們為榮！":"The children are so keen—proper Junior Spies. I'm proud of them!","孩子被父母舉高，好讓他們看清螢幕裡的敵人。":"Children lifted by parents to see the enemy clearly on the screen.","安全？沒有真正的安全。只有比較安靜的角落。":"Safe? No true safety. Only quieter corners.","我叫朱莉亞。在城裡，名字只是另一張配給證。":"My name is Julia. In the city a name is only another ration card.","我睡眠很好。夢裡也喊口號——證明良心乾淨！":"I sleep well. I shout slogans in dreams—proof of a clean conscience!","戰爭即和平。自由即奴役。無知即力量。複誦。":"War is peace. Freedom is slavery. Ignorance is strength. Repeat.","所以我們見面——哪怕只是為了證明還能見面。":"So we meet—if only to prove meeting is still possible.","燈光白得沒有溫度。沒有窗戶。皮帶扣進腕骨。":"Light white without warmth. No windows. Straps buckle into bone.","紅燈一閃：這張是『正確』的。你被記了一筆。":"Red light flashes: this one is 'correct'. A mark against you.","肩膀擠著肩膀。有人已經開始練習口號的節奏。":"Shoulder against shoulder. Someone already practising the slogan rhythm.","走廊裡的回聲也會被記錄。別練習多餘的句子。":"Even echoes in the corridor are recorded. Don't practise surplus sentences.","路已經說好了。舊貨鋪——查林頓先生的樓上。":"The way is agreed. The junk shop—above Mr Charrington's.","酒還在。可今夜你寧可讓紙的氣味先佔領喉嚨。":"Gin remains. Tonight you'd rather let paper-smell take the throat first.","離開之後，照常工作。門會在適當的時候打開。":"After you leave, work as usual. The door will open at the proper time.","仇恨過後，盤子總是更空——人卻更飽。奇妙吧？":"After the Hate, plates are emptier—yet people feel fuller. Odd, isn't it?","先把樓上的房間當成我們的。其餘的，以後再說。":"Treat the upstairs room as ours first. The rest later.","內黨那個——奧勃良。像普通人拜訪上級那樣去。":"That Inner Party man—O'Brien. Go as an ordinary visitor to a superior.","再想一次。黨不要求你假裝。黨要求你真心相信。":"Think again. The Party does not ask you to pretend. It asks sincere belief.","廣場上那一瞥，你記得吧。內黨那個戴眼鏡的——":"That glance in the Square—you remember. The bespectacled Inner Party man—","廣場石縫積著灰水。倒映出電幕的紅光一閃一閃。":"Grey water in Square flagstones. Telescreen red light flickers in it.","很好。從這一刻起，你已經死了——也已經活了。":"Good. From this moment you are already dead—and already alive.","從前這條街還有教堂的鐘聲。現在只剩雨打鐵皮。":"Once this street had church bells. Now only rain on tin.","愛可以被打碎。碎了之後，才能裝進正確的形狀。":"Love can be broken. Only broken can it be fitted to the correct shape.","樓上有間空房……不算貴。沒有電幕，安靜得很。":"There's a vacant room upstairs… not dear. No telescreen, very quiet.","派遜斯說這叫『愛國教育』。我只希望水管先通。":"Parsons calls it 'patriotic education'. I only hope the pipes work first.","漏看一條，等於思想鬆動。思想鬆動，等於危險。":"Miss one line and thought loosens. Loose thought equals danger.","燉菜是粉的。湯是灰的。酒是勝利牌的。請排隊。":"Stew is pink. Soup is grey. Drink is Victory brand. Queue please.","玻璃裡那一點粉紅，像黨還沒來得及改正的顏色。":"That pink in the glass—a colour the Party hasn't corrected yet.","第十一版印好後，上一版就不曾存在。記住這句。":"Once the Eleventh is printed, the last never existed. Remember that.","老師說：孩子是黨的眼睛。我們看得比大人清楚。":"Teacher says: children are the Party's eyes. We see clearer than adults.","那時候……那時候街上還有鐘聲？還是我記錯了？":"Back then… were there still bells in the street? Or do I misremember?","那裡有灰塵、舊歌與一塊粉紅珊瑚。比廣場真實。":"Dust, old songs, and a scrap of pink coral. More real than the Square.","配給減少，且配給增加（相對去年修正後的數字）":"Rations reduced, and rations increased (relative to last year's corrected figures)","門邊的巡邏員咳了一聲。牆上的字似乎還沒看完。":"The patrolman by the door coughs. The words on the wall seem unfinished.","（低吼）……數字正確。前線勝利。敵人永遠存在。":"(Growling) …Figures correct. Front victorious. Enemy forever present.","「對她做吧！」聲音撕開喉嚨，像不是你自己在喊。":"'Do it to her!' The voice tears the throat—as if not your own.","「轉向她！」鐵籠晃了一下——你的手指仍在發抖。":"'Turn it on her!' The cage sways—your fingers still shake.","『兩分鐘仇恨——每日必修。』布邊被風吹得發硬。":"'Two Minutes Hate—daily compulsory.' Cloth edge stiffened by wind.","不對不對——一向都是這個數字。報紙寫得很清楚。":"No, no—it's always been this figure. The paper is perfectly clear.","你同時相信了。門軸同樣鬆動。前方是房 101。":"You believed both at once. The hinge loosens the same. Ahead is Room 101.","你記得自己曾說過怕牠們。原來那句話也被保存了。":"You remember saying you feared them. That sentence, too, was kept.","最後的地方叫房 101。那裡有你最害怕的東西。":"The last place is called Room 101. There is what you fear most.","勝利牌杜松子酒又來一輪。喉嚨燒過，口號才更亮。":"Another round of Victory gin. Throat burned, slogans burn brighter.","可若連這點真實都不許有，活著和死了有什麼分別？":"If even this scrap of truth is forbidden, what difference between living and dead?","可那一瞥已經留在眼底——像一枚不該存在的硬幣。":"But that glance stays on the retina—like a coin that should not exist.","坐下吧，年輕人。這杯不算太嗆——對無產者來說。":"Sit, young man. This cup isn't too harsh—for a prole.","外面什麼都是假的。只有這張床、這點塵，還算真。":"Outside everything is false. Only this bed, this dust, still count as real.","學校教我們：聽壁腳是榮譽。隔壁房間說夢話也算！":"School teaches: eavesdropping is honour. Even next-door sleep-talk counts!","我叫朱莉亞。紙上沒寫名字——名字比情書更危險。":"My name is Julia. No name on the paper—names are more dangerous than love-letters.","我說不清。說得清的人，多半已經不在這間酒館裡。":"I can't say clearly. Those who can mostly aren't in this pub any more.","昨天隔壁那個男人被帶走了。媽媽說他『不乾淨』。":"Yesterday the man next door was taken. Mum said he was 'unclean'.","會被發現。遲早會。但現在——現在還有一點時間。":"We'll be found. Sooner or later. But now—now there is still a little time.","有人說記憶會痛。我說：痛的是還沒被改乾淨的人。":"Some say memory hurts. I say: what hurts is not yet corrected clean.","泥徑被靴子踩實。再往回走，就是勝利大廈的氣味。":"Mud path packed by boots. Walk back and it's Victory Mansions smell again.","終端會提示你刪哪幾個。別心軟——心軟也是舊詞。":"The terminal will tip which to delete. Don't be soft—softness is an old word too.","綠光熄滅。你的手在抖。這在勝利大廈是不可能的。":"Green light dies. Your hand shakes. Impossible in Victory Mansions.","黨說我們贏了。贏了什麼？贏了繼續坐在這兒喝酒。":"The Party says we won. Won what? Won the right to keep sitting here drinking.","仇恨還有半分鐘。你的喉嚨已經沙啞，手心卻是乾的。":"Half a minute of Hate left. Throat already raw; palms dry.","你以為恨意還在。淚水卻先一步抵達。棋子沒有移動。":"You think hatred remains. Tears arrive first. The chessman does not move.","你幾乎以為那一瞥裡有某種默契——又立刻覺得荒唐。":"You almost think the glance held a pact—then find the thought absurd.","兩扇都亮了。最後一題：下列哪組可以『同時成立』？":"Both doors lit. Final question: which set can be 'true at once'?","刪就刪！少想點，多愛黨。我的孩子們就是這樣教的。":"Delete away! Think less, love the Party more. That's how I raise my children.","廣場上那一瞥，你記得吧。戴眼鏡的內黨——去找他。":"That glance in the Square—remember. The Inner Party man with spectacles—go to him.","思想警察已經站在房間中央。黑制服像三塊移動的夜。":"Thought Police already in the room's centre. Black uniforms like three moving nights.","慘叫聲撞在白牆上，沒有回音——牆把聲音也改正了。":"A scream hits the white wall and finds no echo—the wall corrected the sound too.","是有一間。沒有電幕——真正的安靜，現在很少見了。":"There is a room. No telescreen—real quiet, rare these days.","書沒有書名。那是優點。有書名的東西更容易被銷毀。":"The book has no title. That's a virtue. Named things are easier to destroy.","樹幹被風削得光禿。再遠一點，城市的煙柱仍看得見。":"Trunks stripped bare by wind. Further off, the city's smoke-columns still show.","（忽然壓低聲音）等一下——你有沒有聽見牆後面……？":"(Voice suddenly low) Wait—did you hear something behind the wall…?","「不要碰我——她！」字句砸在白光裡，回聲比你更響。":"'Don't touch me—her!' Words smash into white light; the echo louder than you.","人群退潮時，有人從你身旁擦過——廣場邊的黑髮姑娘。":"As the crowd ebbs, someone brushes past—the dark-haired girl at the Square's edge.","你口袋裡沒有字條——字條已經被風吃掉，或被你吃掉。":"No note in your pocket—wind ate it, or you did.","你只翻到中間。公式、年表、口號的反面——已經夠了。":"You only reach the middle. Formulae, timelines, slogan-reversals—enough.","你忽然明白：被掏空的不只是詞彙，還有記得詞彙的人。":"You suddenly see: what is hollowed is not only vocabulary, but those who remember words.","你想想——當『自由』從字典消失，人還能怎麼想自由？":"Think—when 'freedom' vanishes from the dictionary, how can one think freedom?","你聽：思想罪會變得難以發音。難以發音，就難以犯罪。":"Listen: thoughtcrime will become hard to pronounce. Hard to pronounce, hard to commit.","你讀到階層如何自我複製，又如何需要戰爭來餵養恐懼。":"You read how classes reproduce themselves, and how war feeds fear.","同義詞是敵人。細緻的詞是敵人。最後只剩最粗的斧頭。":"Synonyms are the enemy. Fine words are the enemy. Only the coarsest axe remains.","奧勃良塞給你的書。紙很厚。第一章的標題像一把鈍刀。":"The book O'Brien gave you. Thick paper. Chapter One's title like a blunt knife.","她已經在另一間房間。她也會被治好。分開，比較有效。":"She is already in another room. She will be cured too. Separate is more effective.","巧克力減配？那是敵人的謠言。報紙會教你正確的數字。":"Chocolate cut? Enemy rumour. The paper will teach you the correct figure.","思想的範圍，等於語言的範圍。我們正在把圍牆往裡搬。":"The range of thought equals the range of language. We are moving the wall inward.","戰爭之前……總有戰爭之前。像夢的開頭，醒來就沒了。":"Before the war… there is always a before. Like a dream's opening—gone on waking.","房 101 裡是世上最可怕的東西。那東西因人而異。":"In Room 101 is the worst thing in the world. It differs for each person.","是。我愛你。寫下來比說出來安全一點——也危險一點。":"Yes. I love you. Safer written than spoken—and more dangerous.","煮捲心菜的氣味堵住了樓梯口。有人在樓下喊你的名字。":"Boiled-cabbage smell blocks the stair. Someone downstairs calls your name.","版畫掉了。後面露出綠光——這裡從來沒有真正安靜過。":"The engraving falls. Green light behind—never truly quiet here.","窗外：真理部的白色金字塔矗立在霧裡。窗框上積著灰。":"Beyond the window: the Ministry of Truth's white pyramid in fog. Dust on the sill.","自由？自由就是……能罵老闆？能喝夠？能睡到自然醒？":"Freedom? Freedom is… being able to curse the boss? Drink enough? Sleep till you wake?","賽麥總愛談詞。詞有什麼好談？黨說什麼，什麼就是詞。":"Syme loves talking words. What's to talk? What the Party says, that is the word.","賽麥說得對：同義詞是敵人。細緻是敵人。斧頭才乾淨。":"Syme is right: synonyms are the enemy. Fineness is the enemy. The axe is clean.","走廊外還有一扇更安靜的門在等——先聽聽房間裡的人。":"Outside the corridor a quieter door waits—first listen to those in the room.","進來吧，年輕人。雨下得大，鋪子裡總還有地方躲一躲。":"Come in, young man. Hard rain; the shop always has a corner to shelter.","門縫裡有雨的氣味。遮蔽電幕的房間在城的另一頭等你。":"Rain smell in the door crack. The telescreen-sheltered room waits across the city.","黑髮姑娘的臉在記憶裡裂開——不是恨，是更大的空洞。":"The dark-haired girl's face cracks in memory—not hate, a larger hollow.","路已經指給你了。其餘的，會來找你。":"The road has been pointed out. The rest will find you.","（嘶聲）……敵人的面孔在白光裡扭曲、融化、又長回來。":"(Hissing) …The enemy's face twists in white light, melts, grows back.","人群裡第一次注意到她——黑髮，腰間紅帶子，神情冷淡。":"In the crowd you notice her for the first time—dark hair, red sash at the waist, cool expression.","你仍會被算在裡面。我們從不浪費一個已經看見真相的人。":"You will still be counted among us. We never waste one who has already seen the truth.","僕人已經在開門。雨又開始下了。厚書沉甸甸地壓在腋下。":"The servant is already opening the door. Rain begins again. The thick book weighs under your arm.","內黨的電幕……竟然有一個開關。奧勃良的手指停在上面。":"An Inner Party telescreen… actually has a switch. O'Brien's finger rests on it.","分開走。錯開十分鐘。千萬別並肩出現在同一塊螢幕底下。":"Go separately. Ten minutes apart. Never appear shoulder to shoulder under the same screen.","字跡歪斜。紙邊還帶一點溫熱。別在巨型電幕前讀第二次。":"Handwriting crooked. Paper edge still warm. Don't read it twice before the giant telescreen.","寬肩，眼鏡微閃。目光在你臉上停了一瞬，像在確認什麼。":"Broad shoulders, spectacles flashing. Gaze rests on your face a moment, as if confirming something.","櫥窗裡的玻璃還閃著一點溫暖。店主站在貨架旁，微笑著。":"Shop-window glass still holds a little warmth. The shopkeeper stands by the shelves, smiling.","海報貼在樓梯轉角。眼睛從上往下看，像在數你爬了幾級。":"Poster at the stair turn. Eyes look down as if counting how many steps you've climbed.","煮捲心菜的氣味混著舊地毯。整棟樓都在用一種味道說話。":"Boiled cabbage mixed with old carpet. The whole block speaks in one smell.","燈光苛刻得幾乎沒有影子。你開始懷疑：影子也被改正了。":"Light so harsh there are almost no shadows. You begin to suspect shadows have been corrected too.","珊瑚鎮紙被挪到桌上。玻璃裡的粉紅像一小片被封存的海。":"The coral paperweight has been moved to the table. Pink in the glass like a scrap of sealed sea.","那一瞥比口號更響。像一枚不該存在的硬幣，滾進你胸口。":"That glance louder than slogans. Like a coin that should not exist, rolling into your chest.","鐘停在某個不重要的時刻。時間在這裡似乎也願意慢一點。":"The clock stopped at some unimportant hour. Time here seems willing to slow.","電幕仍亮。你調暗過，但從未真正關掉。夜晚的聲音更近。":"Telescreen still on. You dimmed it, never truly off. Night sounds closer.","黨說從前更苦。我也說不清。苦與甜攪在一起，像這杯酒。":"The Party says before was bitterer. I can't tell. Bitter and sweet mixed, like this drink.","他們說無產者是半死不活的——像牲口。牲口不管誰握鞭子。":"They say proles are half-dead—like cattle. Cattle don't care who holds the whip.","你第一次真正「看見」他們。巨型電幕的紅光打在兩張臉上。":"You truly 'see' them for the first time. Giant telescreen red light on two faces.","勝利廣場的電幕還在遠處低鳴。這裡的鋸末氣味卻更像人間。":"Victory Square's telescreen still hums far off. Sawdust smell here feels more like the human world.","城裡有一家舊貨鋪。老闆和善，樓上有間空房——沒有電幕。":"There's a junk shop in the city. Kindly proprietor, vacant room upstairs—no telescreen.","把書帶走。回家讀。讀完之後——再回那間遮蔽電幕的房間。":"Take the book. Read at home. After—return to that room that hides the telescreen.","書合上後，世界並沒有變輕——只是你知道它為什麼這麼重。":"After the book closes the world is no lighter—you only know why it weighs so much.","木桶滲著深色液體。標籤早已被撕掉——也許從來沒有標籤。":"Cask weeping dark liquid. Label long torn away—perhaps never had one.","水泥階梯缺了一角。扶手黏黏的。上面有燈光與標語的影子。":"Concrete stair missing a corner. Handrail sticky. Light and slogan-shadows above.","當句子縮成碎片，有些懷疑再也拼不回去。窗外的雨更密了。":"When sentences shrink to scraps, some doubts cannot be pieced back. Rain thickens beyond the window.","第十一版會刪掉『減配』這個詞。以後就連想『減少』都難。":"The Eleventh will delete the word 'cut'. Later even thinking 'reduce' will be hard.","若你後悔，就別來。我不會怪你——大洋國不給後悔留位子。":"If you regret it, don't come. I won't blame you—Oceania leaves no room for regret.","茱莉亞已經碎過一次。你也會。碎了，才能裝進正確的形狀。":"Julia has already been broken once. So will you. Only broken can you fit the correct shape.","這裡不是房 101——但已經足夠讓人忘記自己還有名字。":"This is not Room 101—but enough to make one forget one still has a name.","你坐下。窗外的雨聲像電幕。有人在問——或者是你在問自己：":"You sit. Rain beyond the window like a telescreen. Someone asks—or you ask yourself:","口號停了。廣場石縫裡的積水還在顫。你告訴自己：這是真心。":"Slogans stop. Puddles in Square flagstones still tremble. You tell yourself: this is sincere.","字條在袖口裡摺了三次。每一次摺痕，都像一次小型的思想罪。":"The note folded three times in a cuff. Each crease a small thoughtcrime.","從前？從前有啤酒。真正的啤酒。不是這種像燒火的杜松子酒。":"Before? Before there was beer. Real beer. Not this gin that tastes of fire.","戰爭不是為了勝利，而是為了維持現狀。紙頁冷靜得近乎殘忍。":"War is not for victory but to preserve the status quo. Pages calm to the point of cruelty.","有時候他們盯著我看，像在練習『報告』。哈哈——玩笑而已。":"Sometimes they stare at me as if practising 'reporting'. Ha—only a joke.","櫥窗映出街上的雨與無產者區的燈火。樓上似乎有一扇門在等。":"Window reflects street rain and prole-quarter lamps. Upstairs a door seems to wait.","牆面空著。沒有綠光，沒有紅點。你第一次覺得房間屬於自己。":"Wall bare. No green light, no red dot. First time the room feels like yours.","珊瑚鎮紙？啊，那是從前的東西。顏色像海水，現在很少見了。":"Coral paperweight? Ah, a thing from before. Sea-coloured; rare now.","盤面上的數字沒有單位。指針停在某一格——像在等一句承認。":"Figures on the dial have no units. Needle stopped on a mark—as if waiting for a confession.","窗外那座金字塔——愈看愈白，愈白愈假……我是說，愈神聖。":"That pyramid beyond the window—whiter the longer you look, whiter and falser… I mean, holier.","電流——或者某種更安靜的東西——穿過牙關。眼睛裡全是白。":"Current—or something quieter—through the jaws. Eyes full of white.","三則『錯誤』已被吞掉。牆上的數字在笑。鈴聲從走廊那頭傳來。":"Three 'errors' swallowed. Numbers on the wall smile. A bell from down the corridor.","上層要保持上層；中層要取代上層；下層——只求偶爾不被踩碎。":"High must stay high; middle must replace high; low—only hope not to be crushed now and then.","他們玩『抓間諜』玩得太認真。昨天差點把寄信的郵差當成敵人。":"They play 'catch the spy' too earnestly. Yesterday nearly took the postman for the enemy.","內黨的門廳沒有勝利大廈的氣味。請放鬆——放鬆也是一種禮儀。":"Inner Party lobby has no Victory Mansions smell. Please relax—relaxation is also etiquette.","口號把廣場撕開一條縫。你忽然看見——內黨的人站在人群邊緣。":"Slogans tear a seam in the Square. You suddenly see—an Inner Party man at the crowd's edge.","她喊得太齊——齊到幾乎像在演戲。你忽然不懂：哪一句是真的。":"She shouts too much in unison—almost like acting. Suddenly you don't know which line is real.","我還會罵黨。罵得很髒。你聽了別嚇一跳——罵，也是一種呼吸。":"I still curse the Party. Filthy curses. Don't jump—cursing is also a kind of breathing.","書脊沒有標題。紙很厚。你感覺它比整個紀錄部的檔案都更危險。":"Spine without title. Thick paper. It feels more dangerous than all Records Department files.","有人有錢，有人沒錢——這我記得。可細節……細節都被喝掉了。":"Some had money, some hadn't—that I remember. But details… details were drunk away.","畫框微微晃了一下。紙頁的氣味還跟著你——也許該先把書讀完。":"Frame trembles slightly. Page-smell still follows you—perhaps finish the book first.","眼睛跟著你。無論你站在左側或右側，目光的距離似乎永遠相等。":"Eyes follow you. Left or right, the distance of the gaze seems forever equal.","腰間紅帶子是反性同盟的標誌。外面裝得愈虔誠，裡面愈敢反抗。":"The red sash marks the Junior Anti-Sex League. The more pious outside, the bolder the revolt within.","裡面有細小的爪子聲——尖銳、匆忙，像無數細齒在鐵絲上試探。":"Tiny claw-sounds inside—sharp, hurried, like countless teeth testing wire.","黨的事別在這間屋子裡嚷。無產者只求一杯不那麼嗆的杜松子酒。":"Don't shout Party business in this room. Proles only want a gin that doesn't burn so much.","人群散開一點。眼鏡的反光還留在餘光裡。儀式同樣記你「完成」。":"Crowd thins a little. Spectacle-flash stays in peripheral vision. The ritual marks you 'complete' the same.","我不信口號。我只信能觸摸的東西：灰塵、皮膚、一扇關得上的門。":"I don't believe slogans. Only what I can touch: dust, skin, a door that shuts.","聖克萊門特的舊印畫也在——歌謠開頭那句，年輕人多半不記得了。":"The old St Clement's print is here too—the song's opening line; the young mostly forget.","舊鏢靶歪掛在牆上。中心的紅心幾乎被戳穿。沒有人記得比賽規則。":"Old dartboard hangs crooked. Red heart nearly punched through. Nobody remembers the rules.","「戰爭即和平」——戰爭動員全民，使內部平靜。因此戰爭就是和平。":"'WAR IS PEACE'—war mobilises all and keeps the interior calm. Therefore war is peace.","你必須準備好：說謊、隱瞞、以至於——若需要——傷害你最愛的人。":"You must be ready: to lie, to conceal, even—if needed—to hurt those you love most.","南面窄巷通向無產者區。酒氣、鋸末與廉價杜松子酒的氣味混在一起。":"South alley leads to the prole quarter. Drink-smell, sawdust and cheap gin mixed.","我們刪『優秀』『卓越』『傑出』——最後只留『好』與『加倍好』。":"We delete 'excellent', 'superb', 'outstanding'—leave only 'good' and 'doubleplusgood'.","握柄磨得發亮。有人反覆使用過它。牆是白的，光是白的，沒有窗戶。":"Handle worn bright. Used often. Walls white, light white, no windows.","書脊仍無標題。那些句子還在胃裡發燙。遮蔽電幕的房間在等你回去。":"Spine still untitled. Sentences still burn in the gut. The telescreen-sheltered room waits for your return.","水管又堵了。孩子們把什麼都塞進排水口——彈珠、紙團、半截鉛筆。":"Pipes blocked again. Children stuff anything down the drain—marbles, paper, half a pencil.","電梯門卡住一半。紙牌寫著：請走樓梯。氣味更濃——像整棟樓的胃。":"Lift door jammed half-open. Card says: use the stairs. Smell thicker—like the building's stomach.","你以為我會舉報你。我也以為你會先舉報我。這就是大洋國的愛情前言。":"You thought I'd denounce you. I thought you'd denounce me first. That is Oceania's preface to love.","又一眼：黑髮姑娘擠在前排，腰間紅帶子一閃。神情冷淡，卻同樣在喊。":"Another glance: dark-haired girl in the front, red sash flashing. Cool face, yet shouting the same.","太單一。再想想『同時』——不過門遲早會開。去把兩扇門再確認一次。":"Too single. Think again of 'at once'—but the door will open sooner or later. Check both doors again.","皮帶與金屬扣。椅子比房 101 的鐵籠樸素，卻同樣讓人無法轉身。":"Straps and metal buckles. Chair plainer than Room 101's cage, equally impossible to turn in.","『好』可以變『加好』『加倍好』。壞呢？壞只要一個『不加好』就夠了。":"'Good' becomes 'plusgood', 'doubleplusgood'. Bad? One 'ungood' is enough.","你去上班？電梯還是壞的。走樓梯吧。上面有人在唱《大洋國，大洋國》。":"Off to work? Lift still broken. Take the stairs. Someone above singing Oceania, Oceania.","棋子擺好了。沒有人真的在下棋。窗外的雨還在下，像電幕換了一種語氣。":"Pieces set. Nobody truly plays. Rain still falls beyond the window, like a telescreen changing tone.","牆上的版畫：聖克萊門特教堂。角落用鉛筆寫著歌謠的殘句。畫框有點鬆。":"Engraving on the wall: St Clement's Church. Pencil scrap of a rhyme in the corner. Frame a little loose.","地上鋪著鋸末，用來蓋住嘔吐與泥水。踩上去沙沙響，像某種被壓低的笑聲。":"Sawdust on the floor to cover vomit and mud. It rasps underfoot like suppressed laughter.","瓶口積灰。標籤上的年份被墨水塗黑。有人說過：過去越不清楚，酒越好賣。":"Dust on the bottle mouth. Year on the label inked out. Someone said: the murkier the past, the better drink sells.","皮椅保養得很好。內黨的房間聞起來乾燥、整潔，幾乎沒有勝利大廈的酸味。":"Leather chair well kept. Inner Party rooms smell dry, clean—almost none of Victory Mansions' sourness.","同一張臉，印了一整層樓。紙角捲起，下面露出更舊的一層——還是同一張臉。":"The same face printed down a whole floor. Paper corner curls; older layer beneath—still the same face.","「戰爭即和平」——和平是黨給予的詞。凡黨所稱的和平，皆可稱為戰爭之成果。":"'WAR IS PEACE'—peace is a word the Party grants. Whatever the Party calls peace may be called war's fruit.","桌面黏糊糊的，鋸末吸不盡潑翻的酒。有人用指甲在邊上刻過一個字，又被刮掉了。":"Table sticky; sawdust can't drink all the spilled gin. Someone scratched a word with a nail, then scraped it away.","紙捲成黑蝴蝶。牆上的標語看起來更乾淨了。灰燼落進抽屜縫，像尚未被改正的歷史。":"Paper curls into a black butterfly. Wall slogans look cleaner. Ash falls into the drawer crack like history not yet corrected.","螢幕沒有開關。你只能把亮度擰暗一點。它仍在看。綠光像潮水，一波波拍打你的臉。":"The screen has no switch. You can only dim it a little. It still watches. Green light like tide, wave on wave against your face.","銘牌寫著：同一句話，兩種真實。字刻得很深，像怕你遺忘——又像怕你只記得一種。":"Plaque reads: one sentence, two truths. Cut deep—as if fearing you forget, or fearing you remember only one.","鎖扣上。電幕的聲音好像高了一格。你把反叛藏進木頭裡，木頭卻不會替你保密太久。":"Lock clicks. Telescreen seems a notch louder. You hide rebellion in wood; wood will not keep secrets long.","路仍通向同一扇門。窗外的雨停了一會兒。你忽然明白：敢寫，已經是一種小型的反叛。":"The road still leads to the same door. Rain pauses beyond the window. You suddenly see: daring to write is already a small revolt.","陰影剛好能遮住肩膀。這裡沒有電幕的綠光。風從草葉間穿過，像一句還沒被刪掉的話。":"Shade just covers the shoulders. No telescreen green here. Wind through grass like a sentence not yet deleted.","窄床。書就攤在被角。走廊的捲心菜氣味像故意提醒你：外面的世界仍在，而且永遠正確。":"Narrow bed. Book open on the blanket corner. Corridor cabbage smell seems to remind you: the outside world remains, and is forever correct.","老大哥的臉掛在每一面牆。咖啡館裡沒有人抬頭——因為抬頭也不需要：你已經被看見了。":"Big Brother's face on every wall. Nobody in the café looks up—no need: you are already seen.","『效忠從每一口湯開始。』字跡被蒸汽燻得發黃。角落還有一行小字：浪費糧食即浪費愛國。":"'Loyalty begins with every spoonful of soup.' Steam yellowed the letters. Small print in the corner: waste food, waste patriotism.","電梯門卡在一半。裡面飄出潮濕的鐵味與舊機油。紙牌寫著：請走樓梯——字跡已被摸得發亮。":"Lift door stuck halfway. Damp iron and old oil drift out. Card: use the stairs—lettering worn bright by fingers.","眼鏡的反光還留在記憶裡。那扇能關掉電幕的門，已經在身後。門後的安靜，比任何噪音都更危險。":"Spectacle-flash still in memory. The door that can switch off a telescreen is behind you. Quiet beyond it more dangerous than any noise.","紙上的字還燙著手心。城外有一片草——她說那裡暫時聽不見。思想寫成字，就像把心臟放到桌上。":"Words on paper still burn the palm. Grass outside the city—she said they can't hear there for now. Thought written down is like laying a heart on the table.","勝利牌香煙。煙絲常掉出來，紙上印著黨徽。吸一口，喉嚨像被砂紙擦過。灰落在指縫裡，像細小的罪。":"Victory cigarettes. Tobacco often spills; Party emblem on the paper. One draw and the throat feels sandpapered. Ash in the finger-cracks like tiny crimes.","深色的酒。氣味與勝利牌杜松子酒完全不同——幾乎像另一個時代。杯腳很乾淨，乾淨得不像這個世紀。":"Dark wine. Smell wholly unlike Victory gin—almost another age. Foot of the glass clean, too clean for this century.","牆灰掉了一小塊。縫裡像有風——又像有耳語。你告訴自己：只是風。可風不會重複同一句不成句的話。":"A scrap of plaster gone. Wind in the crack—or a whisper. You tell yourself: only wind. But wind does not repeat the same unfinished phrase.","電幕仍亮。你把書壓在膝上，綠光從頁緣滲過來——它看不見字，卻看得見你的臉，以及你假裝平靜的眨眼。":"Telescreen still on. Book on your knee; green light seeps from the page-edge—it cannot see the words, but sees your face and the blink you pretend is calm.","「老大哥在看著你。」書頁上的字與海報上的眼，像兩種互相否定的真實——你同時相信兩者，又同時恐懼兩者。":"'BIG BROTHER IS WATCHING YOU.' Words on the page and eyes on the poster: two truths that deny each other—you believe both, and fear both.","金屬盤裡是粉色燉菜與灰湯。勺子刮過盤底，發出黨員們都認識的那種聲音。勝利牌杜松子酒的氣味混在蒸汽裡。":"Metal tray: pink stew and grey soup. Spoon scrapes the bottom with a sound every Party member knows. Victory gin smell mixed in the steam.","配給簿邊角磨白。巧克力那一欄被改過兩次，墨跡顏色不同——但數字永遠『正確』。紙比記憶更可靠，因為紙可以被改。":"Ration book corners worn white. Chocolate column altered twice, ink different colours—but figures forever 'correct'. Paper more reliable than memory, because paper can be changed.","聖克萊門特教堂的舊印畫。下面隱約寫著一句歌謠的開頭。紙邊被蟲蛀過，像時間也在審查。鐘聲早已被改正——改正成沉默。":"Old print of St Clement's Church. A rhyme's opening faintly below. Worm-eaten edge, as if time itself were censoring. Bells long corrected—corrected into silence.","煮捲心菜的氣味混著舊地毯的酸味。電梯壞了很久——壞到成為這棟樓的一種制度。有人說這叫『節約』；有人說這叫『永遠』。":"Boiled cabbage mixed with sour old carpet. Lift broken so long it has become an institution of the block. Some call it 'economy'; some call it 'forever'.","勝利牌杜松子酒。氣味像劣質汽油。喝下去，世界會暫時變軟——然後更真實地發硬。瓶身標籤寫著『為勝利乾杯』，字跡已脫了一半。":"Victory gin. Smells like cheap petrol. Drink, and the world softens a while—then hardens more truly. Label: 'Cheers to Victory'; half the letters gone.","封面寫著：刪去多餘的同義詞。紙邊已經發黃。目錄比上一版薄了三分之一——像一本逐漸消瘦的病歷。空白頁愈多，思想的籠子愈小。":"Cover: delete surplus synonyms. Edges yellowed. Contents a third thinner than last edition—like a case-file wasting away. More blank pages, smaller the cage of thought.","玻璃球裡封著一小段粉紅珊瑚。你把它托在掌心，世界似乎遠了一點——遠到電幕的綠光暫時搆不著。它輕得不像罪證，卻重得像希望。":"A scrap of pink coral sealed in glass. In your palm the world seems farther—far enough the telescreen's green cannot quite reach. Light unlike evidence, heavy like hope.","「老大哥在看著你。」無論你退到門邊或蹲到床沿，海報上的眼睛似乎都會跟著你移動。紙邊捲起，露出更舊的一層——還是同一雙眼睛。":"'BIG BROTHER IS WATCHING YOU.' Retreat to the door or crouch by the bed—the poster's eyes seem to follow. Paper curls, older layer beneath—still the same eyes.","舊式雙人床。床單洗得發白。這裡沒有電幕——安靜得幾乎不真實。你聽見自己的呼吸，像違法。牆後偶爾有細響，你告訴自己：只是老鼠，或只是心。":"Old double bed. Sheets washed white. No telescreen here—quiet almost unreal. You hear your own breath, as if illegal. Fine sounds behind the wall; you tell yourself: only rats, or only the heart.","貨架上擺著舊版畫、殘缺的茶杯、發黃的樂譜。灰塵像一層薄雪。有些物件沒有價格——只貼著『回憶』兩字。回憶在大洋國是危險品，卻仍有人願意販賣。":"Shelves of old prints, chipped cups, yellowed sheet-music. Dust like thin snow. Some things unpriced—only the word 'Memory'. Memory is contraband in Oceania, yet still for sale.","窄床。褥單發硬，像尚未洗淨的罪證。煮菜的氣味從走廊縫裡滲進來；電幕的聲音永遠關不乾淨——像有人在牆後清嗓，提醒你：睡眠也是一種被監視的行為。":"Narrow bed. Sheets stiff like unwashed evidence. Cooking smell seeps from the corridor crack; telescreen never fully off—like someone clearing a throat behind the wall, reminding you: sleep too is a watched act.","雨打著玻璃。棋盤擺好了。角落有一張空桌——上面放著杜松子酒與一份舊報。你的手仍在抖，像剛把什麼人推了出去。旁邊幾個男人的眼睛是空的——空得像已經愛過、也已經輸過。":"Rain on glass. Chess set ready. Empty corner table—gin and an old paper. Your hand still shakes, as if you had just pushed someone away. Eyes of the men nearby are empty—empty as if they had already loved, and already lost.","跟著喊口號":"Shout the slogans","沉默咬牙":"Stay silent","瞥向奧勃良":"Glance at O'Brien","我真心恨":"I truly hate","我只是跟住做":"I only went along","兩分鐘仇恨":"Two Minutes Hate","倒數結束":"Countdown over","壓縮":"Compress","關閉":"Close","取消":"Cancel","抽屜 · 日記":"Drawer · Diary","再走一日":"Walk another day","寫完 · 藏起":"Done · Hide it","寫完 · 燒掉":"Done · Burn it","只存於本機。寫一行你今天不敢大聲說的話。藏起或燒掉。":"Stored on this device only. Write one line you dare not say aloud today. Hide it or burn it.","輸入一句日常話。機器會一層層刪詞，直到幾乎說不出原意。":"Enter an everyday sentence. The machine will delete words layer by layer until almost nothing of the meaning remains.","廣場巨型電幕上出現敵人的剪影。人群齊聲喊叫。倒數結束後，你必須選一種姿勢——無論哪一種，儀式都會記你一筆「完成」。":"The enemy's silhouette appears on the Square's giant telescreen. The crowd shouts as one. When the countdown ends you must choose a posture—whichever you pick, the ritual marks you 'complete'.","你喊了":"You shouted","次，沉默了":" times, stayed silent","次。現在回答——看起來像選擇：":" times. Now answer—it looks like a choice:","牙關發緊。（沉默":"Jaws clenched. (Silent ","）（喊":") (Shouted ","老大哥在看著你":"BIG BROTHER IS WATCHING YOU","開始":"START","PRESS START":"PRESS START","WASD／方向鍵移動 · E／空白鍵互動":"WASD / arrows to move · E / Space to interact","觸控：虛擬搖桿 · 互動鍵":"Touch: virtual stick · Interact button","靈感來自喬治·歐威爾《一九八四》":"Inspired by George Orwell's Nineteen Eighty-Four","靈感來自喬治·歐威爾《一九八四》。":"Inspired by George Orwell's Nineteen Eighty-Four.","你愛老大哥":"YOU LOVE BIG BROTHER","眼淚流了下來，但沒有關係。":"The tears ran down his face, but it did not matter.","一切都歸於平靜。":"Everything was all right.","一切爭鬥都結束了。":"All the struggles were finished.","你贏了自己。——這一局，早已寫好。":"He had won the victory over himself. — This game was written long ago.","公民：":"Citizen: ","口味標記僅供回味，結局唯一。":" Flavour marks are for recollection only; the ending is singular.","標題畫面":"Title screen","黨的口號":"Party slogans","虛擬搖桿":"Virtual stick","按 E／互動":"Press E / Interact","E／互動 · ":"E / Interact · ","撿起：":"Picked up: ","標題改寫為「":"Headline rewritten to «","」":"»","正面：":"Front: ","翻面後你讀到：":"On the reverse you read: ","牆上大標題：「":"Wall headline: «","」。你改過 ":"». You have corrected "," 則。窗外隱約可見白色金字塔的真理部輪廓。":" items. Beyond the window the white pyramid of the Ministry of Truth shows faintly.","語言：中文":"語言：中文","Lang: EN":"Lang: EN","中文":"中文","English":"English","大洋國一日——像素冒險。靈感來自喬治·歐威爾《一九八四》的原創體驗。":"A Day in Oceania — a pixel adventure. An original experience inspired by George Orwell's Nineteen Eighty-Four."};
+
+  function t(s) {
+    if (s == null || s === "") return s;
+    if (state.lang !== "en") return s;
+    if (Object.prototype.hasOwnProperty.call(EN, s)) return EN[s];
+    return s;
+  }
+
+  function setLanguage(lang) {
+    if (lang !== "zh" && lang !== "en") return;
+    state.lang = lang;
+    try { localStorage.setItem("oceania-lang", lang); } catch (_) {}
+    applyLanguage();
+  }
+
+  function applyLanguage() {
+    try {
+      document.documentElement.lang = state.lang === "en" ? "en" : "zh-Hant";
+    } catch (_) {}
+    const isEn = state.lang === "en";
+
+    const setTxt = (sel, zh, en) => {
+      const el = document.querySelector(sel);
+      if (el) el.textContent = isEn ? en : zh;
+    };
+    const setHtml = (sel, zh, en) => {
+      const el = document.querySelector(sel);
+      if (el) el.innerHTML = isEn ? en : zh;
+    };
+
+    try {
+      const meta = document.querySelector('meta[name="description"]');
+      if (meta) meta.setAttribute("content", t("大洋國一日——像素冒險。靈感來自喬治·歐威爾《一九八四》的原創體驗。"));
+    } catch (_) {}
+
+    setTxt(".title-bb-bar", "老大哥在看著你", "BIG BROTHER IS WATCHING YOU");
+    const slogans = document.querySelectorAll(".title-slogans li");
+    if (slogans[0]) slogans[0].textContent = isEn ? "WAR IS PEACE" : "戰爭即和平";
+    if (slogans[1]) slogans[1].textContent = isEn ? "FREEDOM IS SLAVERY" : "自由即奴役";
+    if (slogans[2]) slogans[2].textContent = isEn ? "IGNORANCE IS STRENGTH" : "無知即力量";
+    setTxt(".title-start-label", "開始", "START");
+    setHtml(".title-hint",
+      "WASD／方向鍵移動 · E／空白鍵互動<br/>觸控：虛擬搖桿 · 互動鍵",
+      "WASD / arrows to move · E / Space to interact<br/>Touch: virtual stick · Interact button");
+    setTxt(".title-credit", "靈感來自喬治·歐威爾《一九八四》", "Inspired by George Orwell's Nineteen Eighty-Four");
+
+    const titleScreen = document.querySelector(".title-screen");
+    if (titleScreen) titleScreen.setAttribute("aria-label", isEn ? "Title screen" : "標題畫面");
+    const slogansUl = document.querySelector(".title-slogans");
+    if (slogansUl) slogansUl.setAttribute("aria-label", isEn ? "Party slogans" : "黨的口號");
+    const stick = document.getElementById("stick");
+    if (stick) stick.setAttribute("aria-label", isEn ? "Virtual stick" : "虛擬搖桿");
+
+    document.querySelectorAll(".lang-btn").forEach(btn => {
+      const on = btn.getAttribute("data-lang") === state.lang;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+
+    const hudLang = document.getElementById("btn-lang");
+    if (hudLang) {
+      hudLang.textContent = isEn ? "Lang: EN" : "語言：中文";
+      hudLang.setAttribute("aria-label", isEn ? "Language: English" : "語言：中文");
+    }
+
+    try { Music.syncBtn(); } catch (_) {}
+    try { syncInteractLabel(); } catch (_) {}
+    try { updateQuest(); } catch (_) {}
+
+    /* Mid-game: close open dialogue gracefully (chrome updated; replay interaction for new lang) */
+    try {
+      if (typeof dialogueEl !== "undefined" && dialogueEl && dialogueEl.classList.contains("active")) {
+        hideDialogue();
+      }
+    } catch (_) {}
+    try {
+      const lock = document.getElementById("lock-end");
+      if (lock && lock.classList.contains("active")) {
+        /* refresh ending overlay text */
+        const title = lock.querySelector(".end-title");
+        if (title) title.textContent = t("你愛老大哥");
+        const lead = lock.querySelector(".end-fade-lead");
+        if (lead) lead.innerHTML = t("眼淚流了下來，但沒有關係。") + "<br/>" + t("一切都歸於平靜。");
+        const credit = lock.querySelector(".end-fade-credit");
+        if (credit) credit.textContent = t("靈感來自喬治·歐威爾《一九八四》。");
+        const replay = lock.querySelector("#btn-replay");
+        if (replay) replay.textContent = t("再走一日");
+      }
+    } catch (_) {}
+
+    state.name = t("溫斯頓");
+  }
+
+
+  const keys = new Set();
+  const touch = { ax: 0, ay: 0, active: false };
+
+  const player = {
+    x: 8 * TILE, y: 6 * TILE,
+    w: 10, h: 14,
+    facing: "down", anim: 0, moving: false, frame: 0,
+  };
+
+  /* ---- dark low ambient bed + SFX (Web Audio, offline-safe) ---- */
+  const Music = {
+    ctx: null,
+    master: null,
+    bedGain: null,
+    sfxGain: null,
+    filter: null,
+    nodes: [],
+    seqTimer: null,
+    step: 0,
+    started: false,
+    muted: false,
+    scene: "apartment",
+    hateActive: false,
+    masterVol: 0.67,
+    noiseBuf: null,
+    ambientHum: null,
+    ambientRain: null,
+    ambientHumGain: null,
+    ambientRainGain: null,
+    ambientWant: { hum: false, rain: false },
+    crowdBed: null,
+    crowdBedGain: null,
+    crowdTimer: null,
+    codaTimer: null,
+    ratsTimer: null,
+    arrestPulseTimer: null,
+
+    boot() {
+      try { this.muted = localStorage.getItem("oceania-music-mute") === "1"; } catch (_) {}
+      try {
+        const bootEl = document.getElementById("boot");
+        if (bootEl && bootEl.classList.contains("active")) this.scene = "title";
+      } catch (_) {}
+      this.syncBtn();
+    },
+
+    ensure() {
+      if (this.ctx) return true;
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return false;
+        this.ctx = new AC();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = this.muted ? 0 : this.masterVol;
+        this.filter = this.ctx.createBiquadFilter();
+        this.filter.type = "lowpass";
+        this.filter.frequency.value = 1200;
+        this.filter.Q.value = 0.7;
+        this.bedGain = this.ctx.createGain();
+        this.bedGain.gain.value = 1.0;
+        this.sfxGain = this.ctx.createGain();
+        this.sfxGain.gain.value = 1.6;
+        this.limiter = this.ctx.createDynamicsCompressor();
+        this.limiter.threshold.value = -4;
+        this.limiter.knee.value = 12;
+        this.limiter.ratio.value = 2.2;
+        this.limiter.attack.value = 0.005;
+        this.limiter.release.value = 0.22;
+        this.bedGain.connect(this.filter);
+        this.filter.connect(this.master);
+        this.sfxGain.connect(this.master);
+        this.master.connect(this.limiter);
+        this.limiter.connect(this.ctx.destination);
+        this._makeNoiseBuf();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+
+    _makeNoiseBuf() {
+      try {
+        const len = Math.floor(this.ctx.sampleRate * 1.0);
+        const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        this.noiseBuf = buf;
+      } catch (_) { this.noiseBuf = null; }
+    },
+
+    start() {
+      if (!this.ensure()) return;
+      try {
+        if (this.ctx.state === "suspended") this.ctx.resume();
+      } catch (_) {}
+      const first = !this.started;
+      this.started = true;
+      /* Only kick the bed once — gesture unlock used to re-applyScene every click and stack layers */
+      if (first || !this.seqTimer) this.applyScene(this.scene);
+      this.syncBtn();
+    },
+
+    toggleMute() {
+      if (!this.started) this.start();
+      this.muted = !this.muted;
+      try { localStorage.setItem("oceania-music-mute", this.muted ? "1" : "0"); } catch (_) {}
+      if (this.master && this.ctx) {
+        const t = this.ctx.currentTime;
+        try { this.master.gain.cancelScheduledValues(t); } catch (_) {}
+        this.master.gain.setTargetAtTime(this.muted ? 0 : this.masterVol, t, 0.08);
+      }
+      if (this.muted) {
+        this._stopAmbient(true);
+        this._clearOneShotTimers();
+        try { this.stopCrowdBed(); } catch (_) {}
+      } else {
+        this._applyAmbientForScene(this.scene);
+        if (this.hateActive) { try { this.startCrowdBed(); } catch (_) {} }
+      }
+      this.syncBtn();
+    },
+
+    _clearOneShotTimers() {
+      if (this.codaTimer) { clearTimeout(this.codaTimer); this.codaTimer = null; }
+      if (this.ratsTimer) { clearTimeout(this.ratsTimer); this.ratsTimer = null; }
+      if (this.arrestPulseTimer) { clearTimeout(this.arrestPulseTimer); this.arrestPulseTimer = null; }
+    },
+
+    syncBtn() {
+      const label = this.muted ? t("音樂：關") : t("音樂：開");
+      const pressed = this.muted ? "true" : "false";
+      const tip = this.muted ? t("開啟音樂與音效") : t("關閉音樂與音效");
+      for (const id of ["btn-music", "btn-music-title"]) {
+        const btn = document.getElementById(id);
+        if (!btn) continue;
+        btn.textContent = label;
+        btn.setAttribute("aria-pressed", pressed);
+        btn.title = tip;
+      }
+    },
+
+    stopBed() {
+      if (this.seqTimer) {
+        clearInterval(this.seqTimer);
+        this.seqTimer = null;
+      }
+      const alive = this.nodes.slice();
+      this.nodes = [];
+      for (const n of alive) {
+        try { n.onended = null; } catch (_) {}
+        try { n.stop(); } catch (_) {}
+        try { n.disconnect(); } catch (_) {}
+      }
+      this.step = 0;
+    },
+
+    /* MIDI note → Hz (A4 = 69) */
+    hz(n) {
+      if (n == null || n < 0) return 0;
+      return 440 * Math.pow(2, (n - 69) / 12);
+    },
+
+    /* soft pad/drone tone — sine/triangle for dark bed (SFX may still pass square) */
+    beep(freq, dur, type, vol, dest, when, thick) {
+      if (!this.ctx || !freq || freq < 20) return;
+      const t0 = when != null ? when : this.ctx.currentTime;
+      const wave = type || "sine";
+      const v = Math.max(0.0001, vol || 0.08);
+      const attack = wave === "square" || wave === "sawtooth" ? 0.008 : 0.055;
+      const release = Math.max(0.08, dur * 0.55);
+      const hold = Math.max(0.04, dur);
+      const stopAt = t0 + hold + release + 0.04;
+
+      const makeVoice = (f, gainScale) => {
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = wave;
+        o.frequency.value = f;
+        const vv = Math.max(0.0001, v * gainScale);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(vv, t0 + attack);
+        g.gain.exponentialRampToValueAtTime(vv * 0.72, t0 + hold * 0.55);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + hold + release);
+        o.connect(g);
+        g.connect(dest || this.bedGain);
+        this.nodes.push(o);
+        try { o.start(t0); o.stop(stopAt); } catch (_) {}
+        try {
+          o.onended = () => {
+            const i = this.nodes.indexOf(o);
+            if (i >= 0) this.nodes.splice(i, 1);
+            try { g.disconnect(); } catch (_) {}
+          };
+        } catch (_) {}
+      };
+
+      makeVoice(freq, 1);
+      /* slight detune for thicker cello/drone bass */
+      if (thick && (wave === "sine" || wave === "triangle")) {
+        makeVoice(freq * 0.997, 0.48);
+        makeVoice(freq * 1.0035, 0.28);
+      }
+    },
+
+    hat(dur, vol, when) {
+      if (!this.ctx || !this.noiseBuf) return;
+      const t0 = when != null ? when : this.ctx.currentTime;
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.noiseBuf;
+      const g = this.ctx.createGain();
+      const f = this.ctx.createBiquadFilter();
+      f.type = "highpass";
+      f.frequency.value = 3500;
+      const v = Math.max(0.0001, vol || 0.04);
+      g.gain.setValueAtTime(v, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + Math.max(0.02, dur));
+      src.connect(f);
+      f.connect(g);
+      g.connect(this.bedGain);
+      this.nodes.push(src);
+      try { src.start(t0); src.stop(t0 + dur + 0.04); } catch (_) {}
+      try {
+        src.onended = () => {
+          const i = this.nodes.indexOf(src);
+          if (i >= 0) this.nodes.splice(i, 1);
+          try { g.disconnect(); } catch (_) {}
+          try { f.disconnect(); } catch (_) {}
+        };
+      } catch (_) {}
+    },
+
+    /*
+      Patterns: arrays of steps. Each step:
+        { b: bassMidi|null, l: leadMidi|null, a: arpMidi|null, h: 0|1, vol?: }
+      Length 16 = one bar of 16ths at scene tempo.
+    */
+    patterns() {
+      const hate = this.hateActive;
+      /* darker beds: low bass, sparse minor leads, muted arps */
+      const apt = [
+        { b: 28, l: 43, a: null, h: 0 }, { b: null, l: null, a: 46, h: 0 },
+        { b: null, l: 46, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 28, l: 41, a: null, h: 0 }, { b: null, l: null, a: 48, h: 0 },
+        { b: null, l: null, a: null, h: 0 }, { b: 23, l: 43, a: null, h: 0 },
+        { b: 23, l: null, a: 46, h: 0 }, { b: null, l: 41, a: null, h: 0 },
+        { b: null, l: null, a: null, h: 0 }, { b: null, l: 46, a: 43, h: 0 },
+        { b: 26, l: 40, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 43, a: 46, h: 0 }, { b: null, l: null, a: null, h: 0 },
+      ];
+      const apt2 = [
+        { b: 27, l: 42, a: null, h: 0 }, { b: null, l: null, a: 45, h: 0 },
+        { b: null, l: 45, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 27, l: 40, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 42, a: 47, h: 0 }, { b: 22, l: null, a: null, h: 0 },
+        { b: 22, l: 39, a: null, h: 0 }, { b: null, l: null, a: 45, h: 0 },
+        { b: null, l: 42, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 25, l: 40, a: null, h: 0 }, { b: null, l: null, a: 43, h: 0 },
+        { b: null, l: 45, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+      ];
+      const book = [
+        { b: 29, l: 44, a: 48, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 48, a: 51, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 29, l: 43, a: null, h: 0 }, { b: null, l: null, a: 48, h: 0 },
+        { b: null, l: 46, a: null, h: 0 }, { b: 24, l: null, a: 50, h: 0 },
+        { b: 24, l: 41, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 44, a: 51, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 27, l: 46, a: null, h: 0 }, { b: null, l: null, a: 48, h: 0 },
+        { b: null, l: 44, a: null, h: 0 }, { b: null, l: 41, a: null, h: 0 },
+      ];
+      const lobby = [
+        { b: 30, l: 45, a: null, h: 0 }, { b: null, l: null, a: 49, h: 0 },
+        { b: null, l: 49, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 30, l: 43, a: null, h: 0 }, { b: null, l: null, a: 49, h: 0 },
+        { b: null, l: 45, a: null, h: 0 }, { b: 25, l: null, a: 52, h: 0 },
+        { b: 25, l: 40, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 43, a: 49, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 28, l: 45, a: null, h: 0 }, { b: null, l: null, a: 47, h: 0 },
+        { b: null, l: 49, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+      ];
+      const ministry = [
+        { b: 31, l: 46, a: 50, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 50, a: 53, h: 0 }, { b: null, l: null, a: 50, h: 0 },
+        { b: 31, l: 45, a: null, h: 0 }, { b: null, l: 46, a: null, h: 0 },
+        { b: null, l: 50, a: 53, h: 0 }, { b: 26, l: null, a: null, h: 0 },
+        { b: 26, l: 42, a: 50, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 45, a: 53, h: 0 }, { b: null, l: null, a: 50, h: 0 },
+        { b: 29, l: 46, a: null, h: 0 }, { b: null, l: null, a: 51, h: 0 },
+        { b: null, l: 50, a: null, h: 0 }, { b: null, l: 46, a: null, h: 0 },
+      ];
+      const canteen = [
+        { b: 30, l: 45, a: null, h: 0 }, { b: null, l: null, a: 48, h: 0 },
+        { b: null, l: 48, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 30, l: 43, a: null, h: 0 }, { b: null, l: null, a: 48, h: 0 },
+        { b: null, l: 45, a: 51, h: 0 }, { b: 25, l: null, a: null, h: 0 },
+        { b: 25, l: 40, a: null, h: 0 }, { b: null, l: null, a: 48, h: 0 },
+        { b: null, l: 43, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 28, l: 45, a: 50, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 48, a: null, h: 0 }, { b: null, l: null, a: 48, h: 0 },
+      ];
+      const squareCalm = [
+        { b: 31, l: 46, a: 50, h: 0 }, { b: null, l: 50, a: null, h: 0 },
+        { b: null, l: null, a: 53, h: 0 }, { b: null, l: 46, a: null, h: 0 },
+        { b: 31, l: 46, a: null, h: 0 }, { b: null, l: null, a: 50, h: 0 },
+        { b: null, l: 52, a: null, h: 0 }, { b: 26, l: 46, a: 55, h: 0 },
+        { b: 26, l: 42, a: null, h: 0 }, { b: null, l: 46, a: null, h: 0 },
+        { b: null, l: 50, a: 53, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 29, l: 48, a: null, h: 0 }, { b: null, l: 50, a: null, h: 0 },
+        { b: null, l: null, a: 53, h: 0 }, { b: null, l: 46, a: null, h: 0 },
+      ];
+      /* Hate: heavier crowd-chant pulse — oppressive, not bright chip */
+      const squareHate = [
+        { b: 28, l: 40, a: 47, h: 1, c: 1 }, { b: 28, l: null, a: 52, h: 1 },
+        { b: 28, l: 43, a: 47, h: 1 }, { b: 28, l: 40, a: null, h: 1, c: 1 },
+        { b: 26, l: 38, a: 45, h: 1, c: 1 }, { b: 26, l: null, a: 50, h: 1 },
+        { b: 26, l: 41, a: 45, h: 1 }, { b: 26, l: 50, a: 53, h: 1, c: 1 },
+        { b: 24, l: 36, a: 43, h: 1, c: 1 }, { b: 24, l: null, a: 48, h: 1 },
+        { b: 24, l: 40, a: 43, h: 1 }, { b: 24, l: 36, a: null, h: 1, c: 1 },
+        { b: 23, l: 35, a: 47, h: 1, c: 1 }, { b: 23, l: 41, a: 47, h: 1 },
+        { b: 21, l: 45, a: 52, h: 1, c: 1 }, { b: 21, l: 33, a: 57, h: 1, c: 1 },
+      ];
+      const newspeak = [
+        { b: 31, l: 46, a: null, h: 0 }, { b: null, l: null, a: 50, h: 0 },
+        { b: null, l: 50, a: 55, h: 0 }, { b: null, l: 46, a: null, h: 0 },
+        { b: 31, l: 48, a: null, h: 0 }, { b: null, l: null, a: 50, h: 0 },
+        { b: null, l: 50, a: null, h: 0 }, { b: 26, l: null, a: 53, h: 0 },
+        { b: 26, l: 42, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 46, a: 55, h: 0 }, { b: null, l: null, a: 50, h: 0 },
+        { b: 29, l: 48, a: null, h: 0 }, { b: null, l: null, a: 51, h: 0 },
+        { b: null, l: 50, a: null, h: 0 }, { b: null, l: 46, a: null, h: 0 },
+      ];
+      /* Meadow / Julia — warmer, gentler, bittersweet lyrical lead */
+      const meadow = [
+        { b: 36, l: 55, a: null, h: 0 }, { b: null, l: 57, a: 60, h: 0 },
+        { b: null, l: 60, a: null, h: 0 }, { b: null, l: 57, a: null, h: 0 },
+        { b: 36, l: 55, a: null, h: 0 }, { b: null, l: null, a: 62, h: 0 },
+        { b: null, l: 64, a: null, h: 0 }, { b: null, l: 60, a: 55, h: 0 },
+        { b: 31, l: 52, a: null, h: 0 }, { b: null, l: 55, a: null, h: 0 },
+        { b: null, l: 59, a: 64, h: 0 }, { b: null, l: 55, a: null, h: 0 },
+        { b: 33, l: 57, a: null, h: 0 }, { b: null, l: 60, a: 64, h: 0 },
+        { b: null, l: 62, a: null, h: 0 }, { b: null, l: 55, a: null, h: 0 },
+      ];
+      const junk = [
+        { b: 28, l: 43, a: null, h: 0 }, { b: null, l: null, a: 46, h: 0 },
+        { b: null, l: 46, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 28, l: 41, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 43, a: 50, h: 0 }, { b: 23, l: null, a: null, h: 0 },
+        { b: 23, l: 38, a: null, h: 0 }, { b: null, l: null, a: 46, h: 0 },
+        { b: null, l: 41, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 26, l: 43, a: null, h: 0 }, { b: null, l: null, a: 47, h: 0 },
+        { b: null, l: 46, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+      ];
+      const secret = [
+        { b: 32, l: 48, a: 51, h: 0 }, { b: null, l: 51, a: null, h: 0 },
+        { b: null, l: null, a: 56, h: 0 }, { b: null, l: 51, a: null, h: 0 },
+        { b: 31, l: 47, a: null, h: 0 }, { b: null, l: null, a: 50, h: 0 },
+        { b: null, l: 50, a: 55, h: 0 }, { b: 26, l: 44, a: null, h: 0 },
+        { b: 26, l: 42, a: 51, h: 0 }, { b: null, l: 47, a: null, h: 0 },
+        { b: null, l: 51, a: 56, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 29, l: 49, a: null, h: 0 }, { b: null, l: 51, a: null, h: 0 },
+        { b: null, l: null, a: 56, h: 0 }, { b: null, l: 48, a: null, h: 0 },
+      ];
+      const obrien = [
+        { b: 26, l: 38, a: null, h: 0 }, { b: null, l: null, a: 43, h: 0 },
+        { b: null, l: 43, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 26, l: 37, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 38, a: 50, h: 0 }, { b: 21, l: null, a: null, h: 0 },
+        { b: 21, l: 33, a: null, h: 0 }, { b: null, l: null, a: 43, h: 0 },
+        { b: null, l: 37, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 24, l: 38, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 43, a: 50, h: 0 }, { b: null, l: 38, a: null, h: 0 },
+      ];
+      const gate = [
+        { b: 30, l: 45, a: 48, h: 0 }, { b: null, l: 48, a: null, h: 0 },
+        { b: null, l: null, a: 53, h: 0 }, { b: null, l: 48, a: null, h: 0 },
+        { b: 30, l: 44, a: null, h: 0 }, { b: null, l: null, a: 48, h: 0 },
+        { b: null, l: 48, a: 53, h: 0 }, { b: 25, l: 50, a: null, h: 0 },
+        { b: 25, l: 40, a: null, h: 0 }, { b: null, l: 45, a: null, h: 0 },
+        { b: null, l: 48, a: 53, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 28, l: 47, a: null, h: 0 }, { b: null, l: 48, a: null, h: 0 },
+        { b: null, l: null, a: 53, h: 0 }, { b: null, l: 45, a: null, h: 0 },
+      ];
+      /* Title / boot — watched CRT drone, slow minor pulse */
+      const title = [
+        { b: 26, l: 38, a: 45, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 26, l: 41, a: null, h: 0 }, { b: null, l: 38, a: 50, h: 0 },
+        { b: 24, l: 36, a: 43, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 24, l: 40, a: null, h: 0 }, { b: null, l: 36, a: 48, h: 0 },
+        { b: 23, l: 35, a: 42, h: 0 }, { b: null, l: null, a: 47, h: 0 },
+        { b: 23, l: 38, a: null, h: 0 }, { b: null, l: 35, a: null, h: 0 },
+        { b: 21, l: 33, a: 40, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 26, l: 38, a: 45, h: 0 }, { b: null, l: 41, a: 50, h: 0 },
+      ];
+      /* Room 101 — cold, deep, slow dissonance */
+      const room101 = [
+        { b: 24, l: 30, a: 36, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 24, l: 36, a: 42, h: 0 }, { b: null, l: 30, a: null, h: 0 },
+        { b: 25, l: 31, a: 37, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 25, l: 37, a: 43, h: 0 }, { b: null, l: 31, a: null, h: 0 },
+        { b: 23, l: 29, a: 41, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 22, l: 34, a: 40, h: 0 }, { b: null, l: 28, a: null, h: 0 },
+        { b: 21, l: 33, a: 39, h: 0 }, { b: null, l: null, a: 45, h: 0 },
+        { b: 20, l: 32, a: null, h: 0 }, { b: 20, l: 38, a: 44, h: 0 },
+      ];
+      /* ending — hollow */
+      const chestnut = [
+        { b: 24, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 36, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: null, a: 43, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 19, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 31, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 22, l: 36, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+      ];
+            /* Ending hollow coda — mostly silence, sparse bass + thin lead */
+      const ending = [
+        { b: 19, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 31, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 17, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: null, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: null, a: 36, h: 0 }, { b: null, l: null, a: null, h: 0 },
+      ];
+/* Prole pub — looser, warmer, still weary */
+      const prole_pub = [
+        { b: 29, l: 41, a: null, h: 0 }, { b: null, l: null, a: 46, h: 0 },
+        { b: null, l: 46, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 29, l: 43, a: null, h: 0 }, { b: null, l: null, a: 48, h: 0 },
+        { b: null, l: 41, a: null, h: 0 }, { b: 24, l: null, a: 46, h: 0 },
+        { b: 24, l: 36, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: null, l: 41, a: 48, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 26, l: 43, a: null, h: 0 }, { b: null, l: null, a: 46, h: 0 },
+        { b: null, l: 46, a: null, h: 0 }, { b: null, l: 41, a: null, h: 0 },
+      ];
+      /* Ministry of Love — sparse, oppressive (between gate and 101) */
+      const miniluv = [
+        { b: 25, l: 31, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 25, l: null, a: 37, h: 0 }, { b: null, l: 31, a: null, h: 0 },
+        { b: 24, l: 30, a: null, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 24, l: 36, a: 42, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 22, l: 28, a: null, h: 0 }, { b: null, l: null, a: 34, h: 0 },
+        { b: 22, l: 33, a: null, h: 0 }, { b: null, l: 28, a: null, h: 0 },
+        { b: 21, l: 27, a: 39, h: 0 }, { b: null, l: null, a: null, h: 0 },
+        { b: 20, l: 32, a: null, h: 0 }, { b: null, l: 26, a: null, h: 0 },
+      ];
+      return {
+        title,
+        apartment: apt, apartment2: apt2, apartment_book: book,
+        lobby, corridor: lobby, ministry, canteen,
+        square: hate ? squareHate : squareCalm,
+        newspeak, meadow, junkshop: junk, secret_room: secret,
+        obrien, obrien_flat: obrien, gate, room101, chestnut, ending,
+        prole_pub, miniluv,
+      };
+    },
+
+    sceneTempo() {
+      const hate = this.hateActive;
+      const table = {
+        title: 54,
+        apartment: 60, apartment2: 56, apartment_book: 62,
+        lobby: 66, corridor: 66, ministry: 70, canteen: 68,
+        square: hate ? 96 : 74, newspeak: 72, meadow: 60,
+        junkshop: 62, secret_room: 76, obrien: 52, obrien_flat: 52,
+        gate: 74, room101: 48, chestnut: 42, ending: 36,
+        prole_pub: 58, miniluv: 50,
+      };
+      return table[this.scene] || 62;
+    },
+
+    sceneMix() {
+      const hate = this.hateActive;
+      /* dark muffled bed — bass-forward, soft leads, low filters */
+      const table = {
+        title: { bass: 0.3, lead: 0.1, arp: 0.05, hat: 0.0, filter: 1000, bed: 1.45 },
+        apartment: { bass: 0.28, lead: 0.1, arp: 0.05, hat: 0.0, filter: 1100, bed: 1.4 },
+        apartment2: { bass: 0.26, lead: 0.09, arp: 0.045, hat: 0.0, filter: 1050, bed: 1.35 },
+        apartment_book: { bass: 0.26, lead: 0.12, arp: 0.06, hat: 0.0, filter: 1200, bed: 1.4 },
+        lobby: { bass: 0.27, lead: 0.1, arp: 0.055, hat: 0.015, filter: 1200, bed: 1.4 },
+        corridor: { bass: 0.27, lead: 0.1, arp: 0.055, hat: 0.015, filter: 1150, bed: 1.4 },
+        ministry: { bass: 0.3, lead: 0.11, arp: 0.06, hat: 0.02, filter: 1300, bed: 1.5 },
+        canteen: { bass: 0.27, lead: 0.1, arp: 0.055, hat: 0.02, filter: 1250, bed: 1.45 },
+        square: hate
+          ? { bass: 0.34, lead: 0.14, arp: 0.08, hat: 0.06, filter: 1400, bed: 1.65 }
+          : { bass: 0.28, lead: 0.12, arp: 0.06, hat: 0.02, filter: 1300, bed: 1.5 },
+        newspeak: { bass: 0.27, lead: 0.11, arp: 0.06, hat: 0.015, filter: 1250, bed: 1.45 },
+        meadow: { bass: 0.22, lead: 0.14, arp: 0.07, hat: 0.0, filter: 1800, bed: 1.35 },
+        junkshop: { bass: 0.26, lead: 0.1, arp: 0.05, hat: 0.0, filter: 1100, bed: 1.35 },
+        secret_room: { bass: 0.28, lead: 0.12, arp: 0.06, hat: 0.02, filter: 1200, bed: 1.45 },
+        obrien: { bass: 0.26, lead: 0.08, arp: 0.04, hat: 0.0, filter: 900, bed: 1.3 },
+        obrien_flat: { bass: 0.26, lead: 0.08, arp: 0.04, hat: 0.0, filter: 900, bed: 1.3 },
+        gate: { bass: 0.28, lead: 0.11, arp: 0.06, hat: 0.02, filter: 1250, bed: 1.45 },
+        room101: { bass: 0.32, lead: 0.1, arp: 0.05, hat: 0.015, filter: 700, bed: 1.55 },
+        chestnut: { bass: 0.2, lead: 0.08, arp: 0.04, hat: 0.0, filter: 650, bed: 1.15 },
+        ending: { bass: 0.16, lead: 0.07, arp: 0.03, hat: 0.0, filter: 550, bed: 1.0 },
+        prole_pub: { bass: 0.26, lead: 0.11, arp: 0.055, hat: 0.015, filter: 1300, bed: 1.4 },
+        miniluv: { bass: 0.32, lead: 0.09, arp: 0.045, hat: 0.01, filter: 750, bed: 1.5 },
+      };
+      return table[this.scene] || table.apartment;
+    },
+
+    applyScene(id) {
+      if (id) this.scene = id;
+      if (!this.started || !this.ctx) return;
+      this.stopBed();
+      const mix = this.sceneMix();
+      const t = this.ctx.currentTime;
+      try {
+        this.filter.frequency.cancelScheduledValues(t);
+        this.filter.frequency.setTargetAtTime(mix.filter, t, 0.2);
+        this.bedGain.gain.cancelScheduledValues(t);
+        this.bedGain.gain.setTargetAtTime(mix.bed, t, 0.15);
+      } catch (_) {}
+
+      const bpm = this.sceneTempo();
+      const stepMs = Math.max(70, Math.round(60000 / bpm / 4));
+      const pats = this.patterns();
+      const alias = { obrien_flat: "obrien" };
+      const key = alias[this.scene] || this.scene;
+      const pat = pats[key] || pats.apartment;
+
+      const tick = () => {
+        if (!this.started || !this.ctx) return;
+        try {
+          const st = pat[this.step % pat.length];
+          this.step++;
+          const now = this.ctx.currentTime;
+          const noteDur = (stepMs / 1000) * 1.35;
+          /* keep deep — no octave boost (prefer gloom over phone thinness) */
+          const up = 0;
+          if (st.b != null) this.beep(this.hz(st.b + up), noteDur * 1.45, "sine", mix.bass, this.bedGain, now, true);
+          if (st.l != null) {
+            /* lead one octave lower than pattern midis when high; soft triangle pad */
+            const leadMidi = st.l > 48 ? st.l - 12 : st.l;
+            this.beep(this.hz(leadMidi + up), noteDur * 1.15, "triangle", mix.lead, this.bedGain, now);
+          }
+          if (st.a != null && mix.arp > 0.001) {
+            const arpMidi = st.a > 50 ? st.a - 12 : st.a;
+            this.beep(this.hz(arpMidi + up), noteDur * 0.9, "sine", mix.arp * 0.7, this.bedGain, now);
+          }
+          if (st.h && mix.hat > 0.001) this.hat(0.04 + (this.hateActive ? 0.03 : 0), mix.hat * (this.hateActive ? 1.2 : 1), now);
+          /* low oppressive pulse on strong hate beats (not chip blip) */
+          if (this.hateActive && st.c) {
+            this.beep(this.hz(36 + (this.step % 3)), 0.22, "sine", 0.08, this.bedGain, now, true);
+            this.hat(0.09, mix.hat * 0.85, now + 0.02);
+          }
+          if (this.hateActive && (this.step % 4) === 0) {
+            try { this.crowdBurst(0.55); } catch (_) {}
+          }
+        } catch (_) {}
+      };
+      tick();
+      this.seqTimer = setInterval(tick, stepMs);
+      this._applyAmbientForScene(this.scene);
+    },
+
+    setScene(id) {
+      this.hateActive = false;
+      this.applyScene(id);
+    },
+
+    setHate(on) {
+      this.hateActive = !!on;
+      if (on && this.started && !this.muted) {
+        this.stinger();
+        try { this.startCrowdBed(); } catch (_) {}
+      } else {
+        try { this.stopCrowdBed(); } catch (_) {}
+      }
+      this.applyScene(this.scene);
+    },
+
+    stinger() {
+      if (!this.ensure() || !this.ctx) return;
+      try {
+        const now = this.ctx.currentTime;
+        const notes = [29, 32, 36, 41];
+        for (let i = 0; i < notes.length; i++) {
+          this.beep(this.hz(notes[i]), 0.32, "sine", 0.12, this.sfxGain, now + i * 0.08, true);
+        }
+        this.hat(0.14, 0.05, now);
+      } catch (_) {}
+    },
+
+    holdEnding() {
+      if (!this.started || !this.ctx) return;
+      this.hateActive = false;
+      this.scene = "chestnut";
+      this.applyScene("chestnut");
+    },
+
+    fadeOut(sec) {
+      if (!this.master || !this.ctx) return;
+      const t = this.ctx.currentTime;
+      const s = Math.max(0.4, sec || 2.5);
+      try {
+        this.master.gain.cancelScheduledValues(t);
+        this.master.gain.setValueAtTime(this.muted ? 0 : this.master.gain.value, t);
+        this.master.gain.linearRampToValueAtTime(this.muted ? 0 : 0.12, t + s);
+      } catch (_) {}
+      /* soft stop ambient under fade; coda starts separately */
+      this._stopAmbient(false);
+    },
+
+    /* Hollow ending coda for 「你愛老大哥」 — sparse, under/after fade */
+    playEndingCoda() {
+      if (!this.ensure() || !this.ctx) return;
+      if (this.muted) return;
+      /* already in coda — don't re-stack */
+      if (this.scene === "ending" && this.seqTimer) return;
+      this._clearOneShotTimers();
+      const delay = this.scene === "ending" ? 0 : 1200;
+      const startCoda = () => {
+        if (this.muted || !this.ctx) return;
+        this.hateActive = false;
+        this.scene = "ending";
+        this.applyScene("ending");
+        try {
+          const t = this.ctx.currentTime;
+          this.master.gain.cancelScheduledValues(t);
+          const cur = Math.max(0.08, this.master.gain.value);
+          this.master.gain.setValueAtTime(cur, t);
+          this.master.gain.linearRampToValueAtTime(0.22, t + 1.8);
+          this.master.gain.linearRampToValueAtTime(0.14, t + 6);
+        } catch (_) {}
+        this.setAmbient({ hum: false, rain: false });
+      };
+      /* begin under the fade (~1.2s in), then settle quieter */
+      this.codaTimer = setTimeout(startCoda, delay);
+    },
+
+    /* Thought Police break-in sting + low pulse */
+    playArrestSting() {
+      if (!this.sfxReady()) return;
+      try {
+        const now = this.ctx.currentTime;
+        const harsh = [28, 29, 33, 34, 36, 37];
+        for (let i = 0; i < harsh.length; i++) {
+          this.beep(this.hz(harsh[i]), 0.18 + (i % 2) * 0.05, "sine", 0.11, this.sfxGain, now + i * 0.05, true);
+        }
+        /* noise burst */
+        if (this.noiseBuf) {
+          const src = this.ctx.createBufferSource();
+          src.buffer = this.noiseBuf;
+          const g = this.ctx.createGain();
+          const f = this.ctx.createBiquadFilter();
+          f.type = "bandpass";
+          f.frequency.value = 900;
+          f.Q.value = 0.6;
+          g.gain.setValueAtTime(0.0001, now);
+          g.gain.exponentialRampToValueAtTime(0.22, now + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+          src.connect(f); f.connect(g); g.connect(this.sfxGain);
+          src.start(now); src.stop(now + 0.6);
+        }
+        /* low pulse during ~2s pause before dialogue */
+        if (this.arrestPulseTimer) clearTimeout(this.arrestPulseTimer);
+        let pulses = 0;
+        const pulse = () => {
+          if (this.muted || !this.ctx || pulses >= 5) return;
+          const t = this.ctx.currentTime;
+          this.beep(48, 0.22, "sine", 0.07, this.sfxGain, t, true);
+          this.beep(51, 0.18, "triangle", 0.035, this.sfxGain, t + 0.04);
+          pulses++;
+          this.arrestPulseTimer = setTimeout(pulse, 380);
+        };
+        this.arrestPulseTimer = setTimeout(pulse, 200);
+      } catch (_) {}
+    },
+
+    /* Room 101 rats cage — rising dissonant dread ~4.5s */
+    playRatsRise() {
+      if (!this.sfxReady()) return;
+      if (this.ratsTimer) { clearTimeout(this.ratsTimer); this.ratsTimer = null; }
+      try {
+        const now = this.ctx.currentTime;
+        const steps = 18;
+        for (let i = 0; i < steps; i++) {
+          const t = now + i * (0.22 - i * 0.006);
+          const midi = 28 + i * 2.2;
+          const vol = 0.04 + i * 0.008;
+          this.beep(this.hz(midi), 0.22, "sine", vol, this.sfxGain, t, true);
+          this.beep(this.hz(midi + 0.7), 0.18, "triangle", vol * 0.5, this.sfxGain, t + 0.02);
+          if (i % 3 === 0) this.hat(0.05 + i * 0.002, 0.03 + i * 0.004, t);
+        }
+        /* final cluster */
+        const end = now + 4.2;
+        for (const n of [28, 29, 33, 34, 40]) {
+          this.beep(this.hz(n), 0.45, "sine", 0.1, this.sfxGain, end, true);
+        }
+        if (this.noiseBuf) {
+          const src = this.ctx.createBufferSource();
+          src.buffer = this.noiseBuf;
+          const g = this.ctx.createGain();
+          const f = this.ctx.createBiquadFilter();
+          f.type = "highpass";
+          f.frequency.value = 1200;
+          g.gain.setValueAtTime(0.0001, end);
+          g.gain.exponentialRampToValueAtTime(0.16, end + 0.05);
+          g.gain.exponentialRampToValueAtTime(0.0001, end + 0.7);
+          src.connect(f); f.connect(g); g.connect(this.sfxGain);
+          src.start(end); src.stop(end + 0.75);
+        }
+      } catch (_) {}
+    },
+
+    /* ---- Ambient: telescreen hum + rain ---- */
+    setAmbient(opts) {
+      if (!opts) opts = {};
+      this.ambientWant.hum = !!opts.hum;
+      this.ambientWant.rain = !!opts.rain;
+      if (!this.ensure() || !this.ctx || this.muted || !this.started) {
+        if (this.muted || !this.started) this._stopAmbient(true);
+        return;
+      }
+      if (this.ambientWant.hum) this._startHum();
+      else this._stopHum();
+      if (this.ambientWant.rain) this._startRain();
+      else this._stopRain();
+    },
+
+    _applyAmbientForScene(id) {
+      const humRooms = {
+        apartment: 1, apartment2: 1, apartment_book: 1,
+        lobby: 1, corridor: 1, ministry: 1, canteen: 1,
+        square: 1, newspeak: 1, gate: 1, miniluv: 1,
+        obrien: 1, obrien_flat: 1, room101: 1, title: 1,
+      };
+      const rainRooms = {
+        apartment: 1, apartment2: 1, square: 1, chestnut: 1,
+        corridor: 1, gate: 1,
+      };
+      this.setAmbient({ hum: !!humRooms[id], rain: !!rainRooms[id] });
+    },
+
+    _startHum() {
+      if (!this.ctx || this.ambientHum) return;
+      try {
+        const o = this.ctx.createOscillator();
+        const o2 = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = "sine";
+        o2.type = "triangle";
+        o.frequency.value = 62;
+        o2.frequency.value = 63.5;
+        g.gain.value = 0.0001;
+        o.connect(g); o2.connect(g);
+        g.connect(this.sfxGain);
+        const t = this.ctx.currentTime;
+        g.gain.setTargetAtTime(0.07, t, 0.8);
+        o.start(); o2.start();
+        this.ambientHum = [o, o2];
+        this.ambientHumGain = g;
+      } catch (_) { this.ambientHum = null; }
+    },
+
+    _stopHum() {
+      if (!this.ambientHum) return;
+      try {
+        const t = this.ctx ? this.ctx.currentTime : 0;
+        if (this.ambientHumGain) {
+          this.ambientHumGain.gain.cancelScheduledValues(t);
+          this.ambientHumGain.gain.setTargetAtTime(0.0001, t, 0.25);
+        }
+        const nodes = this.ambientHum;
+        const g = this.ambientHumGain;
+        setTimeout(() => {
+          for (const n of nodes) {
+            try { n.stop(); } catch (_) {}
+            try { n.disconnect(); } catch (_) {}
+          }
+          try { if (g) g.disconnect(); } catch (_) {}
+        }, 600);
+      } catch (_) {}
+      this.ambientHum = null;
+      this.ambientHumGain = null;
+    },
+
+    _startRain() {
+      if (!this.ctx || !this.noiseBuf || this.ambientRain) return;
+      try {
+        const src = this.ctx.createBufferSource();
+        src.buffer = this.noiseBuf;
+        src.loop = true;
+        const bp = this.ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = 1400;
+        bp.Q.value = 0.45;
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 600;
+        const g = this.ctx.createGain();
+        g.gain.value = 0.0001;
+        src.connect(hp); hp.connect(bp); bp.connect(g); g.connect(this.sfxGain);
+        const t = this.ctx.currentTime;
+        g.gain.setTargetAtTime(0.055, t, 1.0);
+        src.start();
+        this.ambientRain = src;
+        this.ambientRainGain = g;
+      } catch (_) { this.ambientRain = null; }
+    },
+
+    _stopRain() {
+      if (!this.ambientRain) return;
+      try {
+        const t = this.ctx ? this.ctx.currentTime : 0;
+        if (this.ambientRainGain) {
+          this.ambientRainGain.gain.cancelScheduledValues(t);
+          this.ambientRainGain.gain.setTargetAtTime(0.0001, t, 0.35);
+        }
+        const src = this.ambientRain;
+        const g = this.ambientRainGain;
+        setTimeout(() => {
+          try { src.stop(); } catch (_) {}
+          try { src.disconnect(); } catch (_) {}
+          try { if (g) g.disconnect(); } catch (_) {}
+        }, 700);
+      } catch (_) {}
+      this.ambientRain = null;
+      this.ambientRainGain = null;
+    },
+
+    _stopAmbient(hard) {
+      this.ambientWant.hum = false;
+      this.ambientWant.rain = false;
+      this._stopHum();
+      this._stopRain();
+      if (hard) { /* already cleared */ }
+    },
+
+
+    /* Crowd heckle / shout bed for Victory Square Hate */
+    crowdBurst(intensity) {
+      if (!this.sfxReady()) return;
+      try {
+        const now = this.ctx.currentTime;
+        const n = 3 + ((Math.random() * 4) | 0);
+        const base = 180 + Math.random() * 220;
+        for (let i = 0; i < n; i++) {
+          const t = now + i * (0.02 + Math.random() * 0.03);
+          const f = base * (0.85 + Math.random() * 0.55) * (1 + (i % 3) * 0.08);
+          const o = this.ctx.createOscillator();
+          const g = this.ctx.createGain();
+          o.type = i % 2 ? "sawtooth" : "square";
+          o.frequency.value = f;
+          const v = Math.max(0.0001, (0.08 + Math.random() * 0.12) * (intensity || 1));
+          g.gain.setValueAtTime(0.0001, t);
+          g.gain.exponentialRampToValueAtTime(v, t + 0.01);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12 + Math.random() * 0.18);
+          o.connect(g);
+          g.connect(this.sfxGain);
+          o.start(t);
+          o.stop(t + 0.35);
+        }
+        if (this.noiseBuf) {
+          const src = this.ctx.createBufferSource();
+          src.buffer = this.noiseBuf;
+          const g = this.ctx.createGain();
+          const bp = this.ctx.createBiquadFilter();
+          bp.type = "bandpass";
+          bp.frequency.value = 900 + Math.random() * 800;
+          bp.Q.value = 0.7;
+          const v = 0.1 * (intensity || 1);
+          g.gain.setValueAtTime(0.0001, now);
+          g.gain.exponentialRampToValueAtTime(v, now + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+          src.connect(bp); bp.connect(g); g.connect(this.sfxGain);
+          src.start(now); src.stop(now + 0.32);
+        }
+      } catch (_) {}
+    },
+
+    startCrowdBed() {
+      if (!this.sfxReady()) return;
+      this.stopCrowdBed();
+      try {
+        if (!this.noiseBuf) return;
+        const src = this.ctx.createBufferSource();
+        src.buffer = this.noiseBuf;
+        src.loop = true;
+        const bp = this.ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.value = 1100;
+        bp.Q.value = 0.55;
+        const g = this.ctx.createGain();
+        g.gain.value = 0.0001;
+        src.connect(bp); bp.connect(g); g.connect(this.sfxGain);
+        const t = this.ctx.currentTime;
+        g.gain.setTargetAtTime(0.09, t, 0.4);
+        src.start();
+        this.crowdBed = src;
+        this.crowdBedGain = g;
+        const pulse = () => {
+          if (!this.crowdBed || this.muted || !this.hateActive) return;
+          try { this.crowdBurst(0.7 + Math.random() * 0.5); } catch (_) {}
+          this.crowdTimer = setTimeout(pulse, 280 + ((Math.random() * 420) | 0));
+        };
+        this.crowdTimer = setTimeout(pulse, 200);
+      } catch (_) {}
+    },
+
+    stopCrowdBed() {
+      if (this.crowdTimer) { clearTimeout(this.crowdTimer); this.crowdTimer = null; }
+      try {
+        const t = this.ctx ? this.ctx.currentTime : 0;
+        if (this.crowdBedGain) {
+          this.crowdBedGain.gain.cancelScheduledValues(t);
+          this.crowdBedGain.gain.setTargetAtTime(0.0001, t, 0.2);
+        }
+        const src = this.crowdBed;
+        const g = this.crowdBedGain;
+        setTimeout(() => {
+          try { if (src) src.stop(); } catch (_) {}
+          try { if (src) src.disconnect(); } catch (_) {}
+          try { if (g) g.disconnect(); } catch (_) {}
+        }, 500);
+      } catch (_) {}
+      this.crowdBed = null;
+      this.crowdBedGain = null;
+    },
+
+    /* ---- SFX (respect master mute) ---- */
+    sfxReady() {
+      if (!this.ensure()) return false;
+      if (!this.started) {
+        try { if (this.ctx.state === "suspended") this.ctx.resume(); } catch (_) {}
+      }
+      return !!(this.ctx && this.sfxGain && !this.muted);
+    },
+
+    sfxBlip(freq, dur, vol) {
+      if (!this.sfxReady()) return;
+      try {
+        const now = this.ctx.currentTime;
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = "square";
+        o.frequency.value = freq;
+        const v = Math.max(0.0001, vol || 0.08);
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.exponentialRampToValueAtTime(v, now + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+        o.connect(g);
+        g.connect(this.sfxGain);
+        o.start(now);
+        o.stop(now + dur + 0.02);
+      } catch (_) {}
+    },
+  };
+
+  const Sfx = {
+    _typeLast: 0,
+    _footLast: 0,
+    type() {
+      if (!Music.sfxReady()) return;
+      const now = performance.now();
+      if (now - this._typeLast < 28) return;
+      this._typeLast = now;
+      const f = 880 + ((Math.random() * 280) | 0);
+      Music.sfxBlip(f, 0.035, 0.14);
+    },
+    click() {
+      try {
+        Music.ensure();
+        if (Music.ctx && Music.ctx.state === "suspended") Music.ctx.resume();
+      } catch (_) {}
+      if (!Music.sfxReady()) return;
+      Music.sfxBlip(520, 0.045, 0.22);
+      setTimeout(() => { try { Music.sfxBlip(780, 0.03, 0.14); } catch (_) {} }, 18);
+    },
+    ui() {
+      this.click();
+    },
+    interact() {
+      if (!Music.sfxReady()) return;
+      Music.sfxBlip(660, 0.04, 0.2);
+      setTimeout(() => { try { Music.sfxBlip(990, 0.05, 0.16); } catch (_) {} }, 30);
+    },
+    advance() {
+      if (!Music.sfxReady()) return;
+      Music.sfxBlip(440, 0.03, 0.12);
+      Music.sfxBlip(660, 0.04, 0.1);
+    },
+    foot() {
+      if (!Music.sfxReady()) return;
+      const now = performance.now();
+      if (now - this._footLast < 160) return;
+      this._footLast = now;
+      const f = 90 + ((Math.random() * 40) | 0);
+      Music.sfxBlip(f, 0.04, 0.08);
+      try { Music.hat(0.03, 0.025); } catch (_) {}
+    },
+    door() {
+      if (!Music.sfxReady()) return;
+      Music.sfxBlip(180, 0.08, 0.16);
+      setTimeout(() => { try { Music.sfxBlip(120, 0.12, 0.12); } catch (_) {} }, 60);
+    },
+    heckle(loud) {
+      try { Music.crowdBurst(loud ? 1.2 : 0.85); } catch (_) {}
+    },
+    confirm() {
+      if (!Music.sfxReady()) return;
+      Music.sfxBlip(523, 0.05, 0.16);
+      setTimeout(() => { try { Music.sfxBlip(784, 0.08, 0.18); } catch (_) {} }, 50);
+    },
+  };
+
+  Music.boot();
+
+  /* Title screen TV static (only while #boot is active) */
+  (function titleStaticLoop() {
+    const canvas = document.getElementById("title-static");
+    const boot = document.getElementById("boot");
+    if (!canvas || !boot) return;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return;
+    const W = canvas.width, H = canvas.height;
+    const img = ctx.createImageData(W, H);
+    const data = img.data;
+    let raf = 0;
+    const frame = () => {
+      if (!boot.classList.contains("active")) {
+        raf = 0;
+        return;
+      }
+      for (let i = 0; i < data.length; i += 4) {
+        const v = (Math.random() * 255) | 0;
+        data[i] = data[i + 1] = data[i + 2] = v;
+        data[i + 3] = 255;
+      }
+      /* CRT snow bands — denser for surveillance vibe */
+      if (Math.random() < 0.42) {
+        const bands = 1 + ((Math.random() * 3) | 0);
+        for (let b = 0; b < bands; b++) {
+          const y = (Math.random() * H) | 0;
+          const h = 1 + ((Math.random() * 4) | 0);
+          for (let row = y; row < y + h && row < H; row++) {
+            for (let x = 0; x < W; x++) {
+              const p = (row * W + x) * 4;
+              const v = 180 + ((Math.random() * 75) | 0);
+              data[p] = data[p + 1] = data[p + 2] = v;
+            }
+          }
+        }
+      }
+      /* red-tinted interference flecks */
+      if (Math.random() < 0.35) {
+        for (let n = 0; n < 12; n++) {
+          const x = (Math.random() * W) | 0;
+          const y = (Math.random() * H) | 0;
+          const p = (y * W + x) * 4;
+          data[p] = 220 + ((Math.random() * 35) | 0);
+          data[p + 1] = 40 + ((Math.random() * 40) | 0);
+          data[p + 2] = 40;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+      raf = requestAnimationFrame(frame);
+    };
+    const start = () => {
+      if (!raf && boot.classList.contains("active")) frame();
+    };
+    start();
+    const obs = new MutationObserver(start);
+    obs.observe(boot, { attributes: true, attributeFilter: ["class"] });
+  })();
+
+  /* Big Brother pupil tracks pointer / touch while title is up */
+  (function titleEyeTrack() {
+    const boot = document.getElementById("boot");
+    const pupil = document.getElementById("title-pupil");
+    const eye = document.getElementById("title-eye");
+    if (!boot || !pupil || !eye) return;
+    let tx = 0, ty = 0;
+    const apply = (clientX, clientY) => {
+      if (!boot.classList.contains("active")) return;
+      const r = eye.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const dx = (clientX - cx) / Math.max(r.width, 1);
+      const dy = (clientY - cy) / Math.max(r.height, 1);
+      const max = Math.min(r.width, r.height) * 0.14;
+      tx = Math.max(-max, Math.min(max, dx * max * 2.2));
+      ty = Math.max(-max, Math.min(max, dy * max * 2.2));
+      pupil.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px)`;
+    };
+    window.addEventListener("pointermove", (e) => apply(e.clientX, e.clientY), { passive: true });
+    window.addEventListener("touchmove", (e) => {
+      if (e.touches && e.touches[0]) apply(e.touches[0].clientX, e.touches[0].clientY);
+    }, { passive: true });
+  })();
+
+  function solidGrid(w, h, fill = 0) {
+    return Array.from({ length: h }, () => Array(w).fill(fill));
+  }
+  function borderWalls(g) {
+    const h = g.length, w = g[0].length;
+    for (let x = 0; x < w; x++) { g[0][x] = 1; g[h - 1][x] = 1; }
+    for (let y = 0; y < h; y++) { g[y][0] = 1; g[y][w - 1] = 1; }
+    return g;
+  }
+
+  const rooms = {};
+
+  function px(x, y, w, h, color) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x | 0, y | 0, w, h);
+  }
+  function pixelGlyph(x, y, pattern, color) {
+    ctx.fillStyle = color;
+    for (let row = 0; row < pattern.length; row++) {
+      const line = pattern[row];
+      for (let col = 0; col < line.length; col++) {
+        if (line[col] === "#") ctx.fillRect(x + col, y + row, 1, 1);
+      }
+    }
+  }
+
+  function drawFloorScuffs(cam, W, H, seed) {
+    for (let i = 0; i < 10; i++) {
+      const x = 1 + ((seed * 3 + i * 5) % (W - 2));
+      const y = 1 + ((seed * 7 + i * 3) % (H - 2));
+      const ppx = x * TILE - cam.x + ((i * 3) % 10);
+      const ppy = y * TILE - cam.y + ((i * 5) % 10);
+      px(ppx, ppy, 2 + (i % 3), 1, i % 2 ? "#2a2e32" : "#1e2226");
+    }
+  }
+  function drawWallGrime(cam, W, H) {
+    for (let x = 1; x < W - 1; x++) {
+      if ((x * 3) % 4 === 0) px(x * TILE - cam.x + 2, 1 * TILE - cam.y, 3, 2, "#1a1c20");
+    }
+  }
+  function drawTinyShadow(wx, wy, cam, w) {
+    px(Math.round(wx - cam.x) + 1, Math.round(wy - cam.y) + 13, w || 8, 2, "rgba(0,0,0,.35)");
+  }
+  function drawBBPoster(sx, sy, cam, size) {
+
+    const s = size || 28;
+    const x = sx - cam.x, y = sy - cam.y;
+    px(x - 2, y - 2, s + 4, s + 10, "#111");
+    px(x, y, s, s + 6, "#2a1a1a");
+    px(x + 2, y + 2, s - 4, s - 2, "#3a2a2a");
+    const cx = x + s / 2, cy = y + s / 2 - 1;
+    px(cx - 8, cy - 9, 16, 18, "#b09070");
+    px(cx - 7, cy - 8, 14, 16, "#c4a484");
+    px(cx - 8, cy - 10, 16, 4, "#1a1a1a");
+    px(cx - 9, cy - 7, 3, 8, "#1a1a1a");
+    px(cx + 6, cy - 7, 3, 8, "#1a1a1a");
+    px(cx - 5, cy + 3, 10, 3, "#2a2a2a");
+    const pxp = player.x + player.w / 2;
+    const pyp = player.y + player.h / 2;
+    const dx = Math.max(-2, Math.min(2, Math.round((pxp - (sx + s / 2)) / 40)));
+    const dy = Math.max(-1, Math.min(1, Math.round((pyp - (sy + s / 2)) / 40)));
+    const twitch = ((state.tick + Math.floor(sx)) % 97) < 4 ? 1 : 0;
+    px(cx - 5 + dx, cy - 3 + dy, 3, 3, C.white);
+    px(cx + 2 + dx, cy - 3 + dy, 3, 3, C.white);
+    px(cx - 4 + dx + twitch, cy - 2 + dy, 2, 2, C.black);
+    px(cx + 3 + dx + twitch, cy - 2 + dy, 2, 2, C.red);
+    /* rare blink lids */
+    if (((state.tick + Math.floor(sy)) % 180) < 5) {
+      px(cx - 5 + dx, cy - 2 + dy, 3, 2, "#b09070");
+      px(cx + 2 + dx, cy - 2 + dy, 3, 2, "#b09070");
+    }
+    px(x + 2, y + s - 2, s - 4, 6, C.redDark);
+    px(x + 4, y + s, s - 8, 2, C.white);
+  }
+
+  function drawDust(cam, w, h, seed) {
+    const t = state.tick;
+    const n = 22;
+    for (let i = 0; i < n; i++) {
+      const a = 0.16 + (i % 5) * 0.055;
+      ctx.fillStyle = `rgba(210,205,180,${a})`;
+      const fx = ((i * 37 + seed * 13 + (t >> 2) + (i & 1 ? t >> 4 : 0)) % Math.max(8, w * TILE - 16)) + 8;
+      const fy = ((i * 53 + seed * 7 + (t >> 3) + (i % 3 === 0 ? (t >> 5) : 0)) % Math.max(8, h * TILE - 24)) + 12;
+      const sz = (i % 4 === 0) ? 2 : 1;
+      ctx.fillRect(fx - cam.x, fy - cam.y, sz, sz);
+    }
+  }
+
+  function drawPaperFlutter(cam, w, h, seed) {
+    const t = state.tick;
+    for (let i = 0; i < 5; i++) {
+      const fx = ((i * 71 + seed * 19 + (t >> 1)) % Math.max(8, w * TILE - 20)) + 10;
+      const fy = ((i * 43 + seed * 11 + (t >> 2)) % Math.max(8, h * TILE - 28)) + 14;
+      const bob = Math.sin((t + i * 17) / 14) > 0 ? 1 : 0;
+      px(fx - cam.x, fy - cam.y + bob, 3 + (i % 2), 2, i % 2 ? C.paper : "#c8c0a8");
+      px(fx - cam.x + 1, fy - cam.y + 1 + bob, 2, 1, "#999");
+    }
+  }
+
+  function drawSteamPuffs(wx, wy, n, seed) {
+    for (let i = 0; i < n; i++) {
+      const a = 0.16 + (i % 3) * 0.06;
+      ctx.fillStyle = `rgba(200,200,200,${a})`;
+      const sx = wx + ((state.tick + i * 11 + seed) % 30) - 5;
+      const sy = wy - ((state.tick + i * 7) % 26);
+      const ww = 3 + (i % 3);
+      ctx.fillRect(sx, sy, ww, 2);
+      if (i % 2 === 0) ctx.fillRect(sx + 1, sy - 2, Math.max(1, ww - 1), 1);
+    }
+  }
+
+  function drawLampFlicker(wx, wy, ww, wh, warm) {
+    const flick = 0.09 + 0.07 * Math.sin(state.tick / 7) + (((state.tick * 5) % 61) === 0 ? -0.05 : 0);
+    const a = Math.max(0.04, flick);
+    ctx.fillStyle = warm
+      ? `rgba(200,160,60,${a})`
+      : `rgba(160,200,160,${Math.max(0.03, flick * 0.7)})`;
+    ctx.fillRect(wx, wy, ww, wh);
+    /* soft core hotspot (pixel bands, no blur) */
+    const cx = wx + (ww >> 1), cy = wy + (wh >> 2);
+    const core = warm ? `rgba(230,190,90,${a * 0.55})` : `rgba(180,220,180,${a * 0.4})`;
+    ctx.fillStyle = core;
+    ctx.fillRect(cx - (ww >> 3), cy, Math.max(4, ww >> 2), Math.max(4, wh >> 2));
+  }
+
+  function drawRainWindow(wx, wy, ww, wh) {
+    px(wx, wy, ww, wh, "#1a2030");
+    px(wx + 2, wy + 2, ww - 4, wh - 4, "#3a4558");
+    const t = state.tick;
+    ctx.fillStyle = C.rain;
+    for (let i = 0; i < 18; i++) {
+      const rx = wx + 3 + ((i * 5 + (t >> 1) * (1 + (i % 2))) % Math.max(4, ww - 8));
+      const ry = wy + 3 + ((i * 7 + t * (1 + (i % 3))) % Math.max(4, wh - 8));
+      ctx.fillRect(rx, ry, 1, 3 + (i % 3));
+    }
+    /* brighter streaks */
+    ctx.fillStyle = "rgba(180,200,220,.35)";
+    for (let i = 0; i < 5; i++) {
+      const rx = wx + 4 + ((i * 11 + t) % Math.max(4, ww - 10));
+      const ry = wy + 3 + ((i * 13 + t * 2) % Math.max(4, wh - 10));
+      ctx.fillRect(rx, ry, 1, 4);
+    }
+    /* mist sheet */
+    ctx.fillStyle = "rgba(140,160,180,.1)";
+    ctx.fillRect(wx + 2, wy + 2, ww - 4, wh - 4);
+    px(wx, wy, ww, 2, C.metal);
+    px(wx, wy + wh - 2, ww, 2, C.metal);
+    px(wx + (ww >> 1) - 1, wy, 2, wh, C.metal);
+  }
+
+  function drawScreenScanlines(sx, sy, sw, sh, bright) {
+    ctx.fillStyle = `rgba(0,0,0,${0.28 + 0.08 * Math.sin(state.tick / 9)})`;
+    for (let i = 0; i < sh; i += 2) ctx.fillRect(sx, sy + i, sw, 1);
+    /* rolling scan band */
+    const roll = ((state.tick * 2) % Math.max(1, sh + 6)) - 2;
+    ctx.fillStyle = `rgba(180,255,180,${0.06 * (bright || 1)})`;
+    ctx.fillRect(sx, sy + roll, sw, 2);
+    if ((state.tick % 40) < 3) {
+      ctx.fillStyle = `rgba(180,255,180,${0.1 * (bright || 1)})`;
+      ctx.fillRect(sx, sy + ((state.tick * 3) % Math.max(1, sh)), sw, 2);
+    }
+  }
+
+  /* ---- global lighting / darkness (pixel-friendly, no blur) ---- */
+  function drawVignette(strength) {
+    if (strength <= 0.01) return;
+    const s = Math.min(0.85, strength);
+    const bands = [
+      [0, 0, VW, 20, s * 0.55],
+      [0, VH - 24, VW, 24, s * 0.68],
+      [0, 0, 18, VH, s * 0.5],
+      [VW - 18, 0, 18, VH, s * 0.5],
+      [0, 0, 36, 28, s * 0.28],
+      [VW - 36, 0, 36, 28, s * 0.28],
+      [0, VH - 40, 40, 40, s * 0.32],
+      [VW - 40, VH - 40, 40, 40, s * 0.32],
+    ];
+    for (const [x, y, w, h, a] of bands) {
+      ctx.fillStyle = `rgba(0,0,0,${a})`;
+      ctx.fillRect(x, y, w, h);
+    }
+  }
+
+  function drawLightPool(sx, sy, r, warm) {
+    /* concentric rect rings ≈ soft radial pool */
+    for (let i = 4; i >= 1; i--) {
+      const rr = (r * i / 4) | 0;
+      const a = (warm ? 0.055 : 0.04) * (5 - i) / 4;
+      ctx.fillStyle = warm
+        ? `rgba(210,170,70,${a})`
+        : `rgba(110,170,200,${a})`;
+      ctx.fillRect(sx - rr, sy - (rr * 0.7) | 0, rr * 2, (rr * 1.4) | 0);
+    }
+  }
+
+  function drawWindowShaft(wx, wy, ww, hh, cool) {
+    const a = 0.06 + 0.03 * Math.sin(state.tick / 40);
+    ctx.fillStyle = cool
+      ? `rgba(140,170,200,${a})`
+      : `rgba(200,190,140,${a})`;
+    ctx.fillRect(wx, wy, ww, hh);
+    ctx.fillStyle = cool
+      ? `rgba(160,190,220,${a * 0.55})`
+      : `rgba(220,210,150,${a * 0.55})`;
+    ctx.fillRect(wx + 2, wy, Math.max(2, ww - 4), hh);
+  }
+
+  function drawCornerDark(amount) {
+    if (amount <= 0.01) return;
+    const a = amount;
+    ctx.fillStyle = `rgba(0,0,0,${a})`;
+    ctx.fillRect(0, 0, 28, 24);
+    ctx.fillRect(VW - 28, 0, 28, 24);
+    ctx.fillRect(0, VH - 32, 32, 32);
+    ctx.fillRect(VW - 32, VH - 32, 32, 32);
+    ctx.fillStyle = `rgba(0,0,0,${a * 0.55})`;
+    ctx.fillRect(0, VH >> 1, 12, VH >> 1);
+    ctx.fillRect(VW - 12, VH >> 1, 12, VH >> 1);
+  }
+
+  function drawRoomLighting(r, cam) {
+    if (!r) return;
+    const id = r.id;
+    const harsh = id === "room101" || id === "miniluv" || id === "gate";
+    const outdoor = id === "meadow" || id === "square";
+    const cafe = id === "chestnut" || id === "prole_pub" || id === "junkshop" || id === "secret_room";
+    const apt = id === "apartment" || id === "apartment2" || id === "apartment_book";
+    const darkIndoor = apt || id === "corridor" || id === "lobby" || harsh;
+
+    /* base darkness / mood wash */
+    if (harsh) {
+      ctx.fillStyle = "rgba(0,0,0,.22)";
+      ctx.fillRect(0, 0, VW, VH);
+      /* overhead hot spot */
+      drawLightPool(VW >> 1, 28, 70, false);
+      ctx.fillStyle = `rgba(230,230,240,${0.06 + 0.04 * Math.sin(state.tick / 12)})`;
+      ctx.fillRect((VW >> 1) - 40, 0, 80, 50);
+      if (((state.tick * 2) % 61) < 3) {
+        ctx.fillStyle = "rgba(255,255,255,.08)";
+        ctx.fillRect(0, 0, VW, VH);
+      }
+      drawVignette(0.72);
+      drawCornerDark(0.28);
+    } else if (outdoor) {
+      drawVignette(0.18);
+      if (id === "meadow") {
+        ctx.fillStyle = "rgba(220,220,180,.04)";
+        ctx.fillRect(0, 0, VW, VH);
+        /* drifting cloud shadow bands */
+        const cx = ((state.tick >> 1) % (VW + 80)) - 40;
+        ctx.fillStyle = "rgba(40,50,60,.07)";
+        ctx.fillRect(cx, 20, 70, VH - 40);
+        ctx.fillRect(cx + 110, 10, 50, VH - 30);
+      }
+    } else if (cafe) {
+      ctx.fillStyle = "rgba(40,28,18,.14)";
+      ctx.fillRect(0, 0, VW, VH);
+      drawVignette(0.38);
+      drawCornerDark(0.12);
+    } else if (darkIndoor) {
+      ctx.fillStyle = "rgba(0,0,0,.12)";
+      ctx.fillRect(0, 0, VW, VH);
+      drawVignette(apt ? 0.52 : (id === "corridor" ? 0.58 : 0.45));
+      drawCornerDark(apt ? 0.2 : 0.16);
+    } else if (id === "newspeak" || id === "ministry" || id === "canteen") {
+      drawVignette(0.34);
+      drawCornerDark(0.1);
+    } else {
+      drawVignette(0.3);
+    }
+
+    /* room-anchored lamp / screen pools (screen-space from world) */
+    function poolAt(tx, ty, rad, warm) {
+      drawLightPool(tx * TILE - cam.x + 8, ty * TILE - cam.y + 8, rad, warm);
+    }
+    if (apt) {
+      poolAt(11, 5, 42, true);
+      poolAt(9, 1, 38, false);
+      drawWindowShaft(6 * TILE - cam.x + 4, 1 * TILE - cam.y + 16, 20, 70, true);
+    } else if (id === "lobby") {
+      poolAt(3, 2, 36, true);
+      drawWindowShaft(2 * TILE - cam.x, 1 * TILE - cam.y + 10, 16, 50, true);
+    } else if (id === "corridor") {
+      for (let i = 0; i < 4; i++) {
+        const on = ((state.tick + i * 17) % 40) > 3;
+        if (on) poolAt(4 + i * 4, 2, 28, true);
+      }
+    } else if (id === "ministry") {
+      poolAt(8, 8, 34, true);
+      poolAt(6, 1, 40, false);
+    } else if (id === "canteen") {
+      poolAt(7, 1, 36, false);
+      poolAt(5, 3, 30, true);
+    } else if (id === "newspeak") {
+      poolAt(5, 3, 44, false);
+    } else if (id === "junkshop" || id === "secret_room") {
+      poolAt(8, 2, 40, true);
+      if (id === "junkshop") poolAt(2, 1, 36, true);
+    } else if (id === "chestnut" || id === "prole_pub") {
+      poolAt(7, 2, 48, true);
+    } else if (id === "obrien_flat") {
+      poolAt(8, 3, 40, true);
+    } else if (id === "miniluv" || id === "room101") {
+      poolAt(6, 1, 55, false);
+    }
+  }
+
+  function drawObjectGlint(x, y, period, seed) {
+    if (((state.tick + seed) % period) < 4) {
+      px(x, y, 1, 1, "#fff");
+      px(x + 1, y, 1, 1, "rgba(255,255,255,.5)");
+    }
+  }
+
+  function drawAshRise(wx, wy, n, seed) {
+    ctx.fillStyle = "rgba(200,120,60,.55)";
+    for (let i = 0; i < n; i++) {
+      const ax = wx + ((state.tick + i * 9 + seed) % 16) - 2;
+      const ay = wy - ((state.tick + i * 5) % 18);
+      ctx.fillRect(ax, ay, 1, 1);
+    }
+  }
+
+  function drawElevatorSparks(wx, wy) {
+    if (((state.tick * 3) % 37) > 6) return;
+    ctx.fillStyle = "#ffe080";
+    for (let i = 0; i < 3; i++) {
+      const sx = wx + 4 + ((state.tick + i * 7) % 20);
+      const sy = wy + ((state.tick * 2 + i * 5) % 16);
+      ctx.fillRect(sx, sy, 1, 1);
+    }
+  }
+
+  function npcBlinkLids(ppx, ppy, seed, eyeY, skin) {
+    if (((state.tick + seed * 11) % (140 + (seed % 40))) >= 5) return;
+    ctx.fillStyle = skin || "#c4a484";
+    ctx.fillRect(ppx + 3, ppy + eyeY, 1, 1);
+    ctx.fillRect(ppx + 6, ppy + eyeY, 1, 1);
+  }
+
+
+  function makeApartment() {
+    const W = 14, H = 11;
+    const g = borderWalls(solidGrid(W, H, 0));
+    g[2][3] = 1; g[2][4] = 1;
+    g[3][3] = 1; g[3][4] = 1;
+    g[2][9] = 1; g[2][10] = 1;
+    g[7][2] = 1;
+    return {
+      id: "apartment",
+      name: "勝利大廈 · 房間",
+      w: W, h: H, tiles: g,
+      spawn: { x: 7 * TILE, y: 6 * TILE },
+      exits: [
+        { x: 12, y: 5, w: 1, h: 2, to: "lobby", spawnX: 2 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.dimmedScreen,
+          blockedMsg: "電幕的綠光還咬著你的背。" },
+      ],
+      objects: [
+        { id: "telescreen", x: 9, y: 1, w: 2, h: 1, label: "電幕", kind: "telescreen" },
+        { id: "bed", x: 3, y: 2, w: 2, h: 2, label: "床", kind: "examine",
+          text: "窄床。褥單發硬，像尚未洗淨的罪證。煮菜的氣味從走廊縫裡滲進來；電幕的聲音永遠關不乾淨——像有人在牆後清嗓，提醒你：睡眠也是一種被監視的行為。" },
+        { id: "drawer", x: 2, y: 7, w: 1, h: 1, label: "抽屜", kind: "diary",
+          locked: () => !state.flags.newspeakDone },
+        { id: "gin", x: 11, y: 7, w: 1, h: 1, label: "勝利牌杜松子酒", kind: "examine",
+          text: "勝利牌杜松子酒。氣味像劣質汽油。喝下去，世界會暫時變軟——然後更真實地發硬。瓶身標籤寫著『為勝利乾杯』，字跡已脫了一半。" },
+        { id: "cig", x: 5, y: 7, w: 1, h: 1, label: "勝利牌香煙", kind: "examine",
+          text: "勝利牌香煙。煙絲常掉出來，紙上印著黨徽。吸一口，喉嚨像被砂紙擦過。灰落在指縫裡，像細小的罪。" },
+        { id: "bbwall", x: 1, y: 3, w: 1, h: 2, label: "老大哥海報", kind: "examine",
+          text: "「老大哥在看著你。」無論你退到門邊或蹲到床沿，海報上的眼睛似乎都會跟著你移動。紙邊捲起，露出更舊的一層——還是同一雙眼睛。" },
+        { id: "smell", x: 7, y: 1, w: 1, h: 1, label: "走廊氣味", kind: "examine",
+          text: "煮捲心菜的氣味混著舊地毯的酸味。電梯壞了很久——壞到成為這棟樓的一種制度。有人說這叫『節約』；有人說這叫『永遠』。" },
+        { id: "wallcrack", x: 6, y: 8, w: 1, h: 1, label: "牆縫", kind: "examine",
+          text: "牆灰掉了一小塊。縫裡像有風——又像有耳語。你告訴自己：只是風。可風不會重複同一句不成句的話。" },
+        { id: "ration", x: 10, y: 6, w: 1, h: 1, label: "配給簿", kind: "examine",
+          text: "配給簿邊角磨白。巧克力那一欄被改過兩次，墨跡顏色不同——但數字永遠『正確』。紙比記憶更可靠，因為紙可以被改。" },
+      ],
+      drawExtra(ctx, cam) {
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++)
+            if (this.tiles[y][x] === 0 && (x + y) % 2 === 0)
+              px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, C.carpet);
+        px(5 * TILE - cam.x + 4, 1 * TILE - cam.y + 6, 10, 6, "#2a2222");
+        px(5 * TILE - cam.x + 6, 1 * TILE - cam.y + 8, 6, 3, "#332828");
+        px(1 * TILE - cam.x + 4, 5 * TILE - cam.y, 8, 20, "#2a2820");
+        drawDust(cam, W, H, 1);
+        drawRainWindow(6 * TILE - cam.x, 1 * TILE - cam.y, 28, 16);
+        const lx = 11 * TILE - cam.x + 4, ly = 5 * TILE - cam.y;
+        px(lx + 4, ly, 4, 2, C.metal);
+        px(lx + 5, ly + 2, 2, 8, C.metal);
+        px(lx + 2, ly + 10, 8, 5, "#c9a84a");
+        px(lx + 3, ly + 11, 6, 3, "#e8d080");
+        const sx = 9 * TILE - cam.x, sy = 1 * TILE - cam.y;
+        const baseB = state.flags.dimmedScreen ? 0.3 : 0.9;
+        /* subtle CRT flicker — sine + rare dim tick, never hard strobe of whole sprite */
+        const flick = 0.9 + 0.1 * Math.sin(state.tick / 3.5) + (((state.tick * 3) % 53) === 0 ? -0.18 : 0);
+        const bright = Math.max(0.12, Math.min(1, baseB * flick));
+        px(sx - 2, sy - 1, 36, 18, "#222");
+        px(sx, sy, 32, 16, `rgba(80,140,80,${bright})`);
+        px(sx + 2, sy + 2, 28, 12, C.black);
+        px(sx + 4, sy + 3, 24, 9, state.flags.dimmedScreen ? "#142814" : C.screen);
+        ctx.fillStyle = "rgba(0,0,0,.35)";
+        for (let i = 0; i < 5; i++) ctx.fillRect(sx + 4, sy + 3 + i * 2, 24, 1);
+        px(sx + 12, sy + 4, 8, 7, "#1a1a1a");
+        px(sx + 13, sy + 5, 6, 5, C.white);
+        px(sx + 15, sy + 6, 2, 3, C.red);
+        px(sx + 15, sy + 7, 1, 1, C.white);
+        px(sx + 26, sy + 4, 4, 8, "#333");
+        for (let i = 0; i < 4; i++) px(sx + 27, sy + 5 + i * 2, 2, 1, "#555");
+        const bx = 3 * TILE - cam.x, by = 2 * TILE - cam.y;
+        px(bx, by, 32, 32, "#3a2e2e");
+        px(bx + 1, by + 2, 30, 28, "#5a4a4a");
+        px(bx + 4, by + 4, 24, 8, "#c8c0b0");
+        px(bx + 6, by + 6, 20, 4, "#b0a898");
+        px(bx + 2, by + 14, 28, 16, "#6a3a3a");
+        px(bx + 2, by + 14, 28, 3, "#8a4a4a");
+        px(bx, by, 2, 32, C.wood);
+        px(bx + 30, by, 2, 32, C.wood);
+        const dx = 2 * TILE - cam.x, dy = 7 * TILE - cam.y;
+        px(dx, dy, 16, 16, C.wood);
+        px(dx + 1, dy + 1, 14, 14, C.woodLite);
+        px(dx + 2, dy + 3, 12, 5, C.wood);
+        px(dx + 2, dy + 9, 12, 5, C.wood);
+        px(dx + 6, dy + 5, 4, 1, C.metal);
+        px(dx + 6, dy + 11, 4, 1, C.metal);
+        const gx = 11 * TILE - cam.x + 4, gy = 7 * TILE - cam.y + 2;
+        px(gx, gy + 4, 8, 10, C.gin);
+        px(gx + 2, gy, 4, 5, C.gin);
+        px(gx + 1, gy + 5, 6, 2, C.redDark);
+        px(gx + 3, gy + 8, 2, 4, "#8a9a6a");
+        const cx0 = 5 * TILE - cam.x + 3, cy0 = 7 * TILE - cam.y + 6;
+        px(cx0, cy0, 10, 7, C.cig);
+        px(cx0 + 1, cy0 + 1, 8, 2, C.red);
+        px(cx0 + 2, cy0 + 4, 6, 1, "#8a6040");
+        drawBBPoster(1 * TILE + 2, 3 * TILE, cam, 22);
+        px(12 * TILE - cam.x - 6, 4 * TILE - cam.y + 8, 8, 5, C.paper);
+        px(12 * TILE - cam.x - 5, 4 * TILE - cam.y + 9, 6, 1, "#999");
+        /* crumbs / ash / wall damp */
+        px(6 * TILE - cam.x + 2, 8 * TILE - cam.y + 10, 2, 1, "#5a5040");
+        px(7 * TILE - cam.x + 8, 8 * TILE - cam.y + 4, 1, 1, "#6a6050");
+        px(4 * TILE - cam.x, 6 * TILE - cam.y + 2, 6, 2, "rgba(40,50,40,.35)");
+        px(8 * TILE - cam.x + 4, 4 * TILE - cam.y, 3, 8, "rgba(0,0,0,.2)");
+        drawFloorScuffs(cam, W, H, 1);
+        drawWallGrime(cam, W, H);
+        /* telescreen wall bracket shadow */
+        px(sx - 4, sy + 16, 40, 3, "rgba(0,0,0,.4)");
+        drawScreenScanlines(sx + 4, sy + 3, 24, 9, bright);
+        drawLampFlicker(lx, ly + 8, 14, 18, true);
+        drawPaperFlutter(cam, W, H, 1);
+        drawSteamPuffs(5 * TILE - cam.x + 8, 2 * TILE - cam.y + 4, 3, 2);
+        /* distant corridor figure silhouette flash */
+        if ((state.tick % 220) > 200) {
+          px(12 * TILE - cam.x + 2, 5 * TILE - cam.y, 6, 12, "rgba(20,20,24,.45)");
+        }
+        /* richer prop detail: bed wrinkles, knobs, gin/cig glints, cracks, ration, carpet, screws */
+        px(bx + 8, by + 5, 8, 1, "#a8a090");
+        px(bx + 10, by + 7, 6, 1, "#9a9280");
+        px(bx + 6, by + 16, 10, 1, "#5a3030");
+        px(bx + 14, by + 20, 8, 1, "#4a2828");
+        px(dx + 12, dy + 5, 2, 2, C.metal);
+        px(dx + 12, dy + 11, 2, 2, C.metal);
+        px(dx + 3, dy + 4, 1, 3, "#5a4030");
+        drawObjectGlint(gx + 5, gy + 6, 90, 3);
+        px(gx + 6, gy + 7, 1, 3, "#e8f0c8");
+        px(cx0 + 2, cy0 + 2, 6, 1, C.redDark);
+        px(cx0 + 3, cy0 + 5, 1, 1, "#fff");
+        px(6 * TILE - cam.x + 4, 8 * TILE - cam.y + 2, 1, 8, "#1a1818");
+        px(6 * TILE - cam.x + 5, 8 * TILE - cam.y + 6, 2, 1, "#2a2820");
+        px(6 * TILE - cam.x + 3, 8 * TILE - cam.y + 4, 1, 1, "#6a6050");
+        const rx = 10 * TILE - cam.x + 2, ry = 6 * TILE - cam.y + 4;
+        px(rx, ry, 10, 8, "#5a3a2a");
+        px(rx + 1, ry + 1, 8, 6, "#6a4a3a");
+        px(rx + 2, ry, 2, 8, "#8a6a4a");
+        px(rx + 3, ry + 2, 5, 1, C.redDark);
+        px(4 * TILE - cam.x + 2, 5 * TILE - cam.y + 10, 8, 2, "rgba(60,40,40,.4)");
+        px(8 * TILE - cam.x, 7 * TILE - cam.y + 8, 6, 2, "rgba(40,50,40,.3)");
+        px(sx - 1, sy + 2, 1, 1, C.metal);
+        px(sx + 31, sy + 2, 1, 1, C.metal);
+        px(sx - 1, sy + 12, 1, 1, C.metal);
+        px(sx + 31, sy + 12, 1, 1, C.metal);
+        /* hanging lamp sway */
+        const sway = Math.sin(state.tick / 18) > 0.4 ? 1 : (Math.sin(state.tick / 18) < -0.4 ? -1 : 0);
+        px(lx + 5 + sway, ly + 2, 2, 8, C.metal);
+      },
+    };
+  }
+
+
+  function makeLobby() {
+    const W = 18, H = 11;
+    const g = borderWalls(solidGrid(W, H, 0));
+    for (let x = 4; x <= 6; x++) g[3][x] = 1;
+    g[7][8] = 1; g[7][9] = 1;
+    g[5][12] = 1;
+    return {
+      id: "lobby",
+      name: "勝利大廈 · 門廳",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 5 * TILE },
+      exits: [
+        { x: 1, y: 4, w: 1, h: 3, to: "apartment", spawnX: 11 * TILE, spawnY: 5 * TILE, need: () => true },
+        { x: 16, y: 4, w: 1, h: 3, to: "corridor", spawnX: 2 * TILE, spawnY: 4 * TILE,
+          need: () => state.flags.lobbySeen,
+          blockedMsg: "煮捲心菜的氣味堵住了樓梯口。有人在樓下喊你的名字。" },
+      ],
+      objects: [
+        { id: "mrs", x: 5, y: 5, w: 1, h: 1, label: "派遜斯太太", kind: "npc", style: "mrs",
+          lines: () => {
+            state.flags.lobbySeen = true;
+            return [
+              ["派遜斯太太", "水管又堵了。孩子們把什麼都塞進排水口——彈珠、紙團、半截鉛筆。"],
+              ["派遜斯太太", "臉都洗不乾淨。肥皂配給又薄了一層。"],
+              ["派遜斯太太", "他們玩『抓間諜』玩得太認真。昨天差點把寄信的郵差當成敵人。"],
+              ["派遜斯太太", "你去上班？電梯還是壞的。走樓梯吧。上面有人在唱《大洋國，大洋國》。"],
+              ["派遜斯太太", "派遜斯說這叫『愛國教育』。我只希望水管先通。"],
+            ];
+          } },
+        { id: "kid1", x: 9, y: 6, w: 1, h: 1, label: "小英雄", kind: "npc", style: "kid",
+          lines: () => {
+            state.flags.lobbySeen = true;
+            return [
+              ["小英雄", "叛徒！我們在玩抓間諜！"],
+              ["另一個孩子", "你走路的樣子像外黨的！哈哈哈！"],
+              ["小英雄", "媽媽說：看見可疑的人，就要報告。你可疑嗎？"],
+              ["小英雄", "學校教我們：聽壁腳是榮譽。隔壁房間說夢話也算！"],
+              ["另一個孩子", "誰要是不喊口號，誰就是思想犯！"],
+            ];
+          } },
+        { id: "kid2", x: 10, y: 7, w: 1, h: 1, label: "小英雄", kind: "npc", style: "kid",
+          lines: () => {
+            state.flags.lobbySeen = true;
+            return [
+              ["小英雄", "老大哥在看著你——我們也在看著你！"],
+              ["小英雄", "昨天隔壁那個男人被帶走了。媽媽說他『不乾淨』。"],
+              ["小英雄", "他的鞋子還在門外。我們拿來當戰利品。"],
+              ["小英雄", "老師說：孩子是黨的眼睛。我們看得比大人清楚。"],
+            ];
+          } },
+        { id: "lift", x: 8, y: 7, w: 2, h: 1, label: "壞掉的電梯", kind: "examine",
+          text: "電梯門卡在一半。裡面飄出潮濕的鐵味與舊機油。紙牌寫著：請走樓梯——字跡已被摸得發亮。" },
+        { id: "cabbage", x: 3, y: 2, w: 1, h: 1, label: "氣味", kind: "examine",
+          text: () => { state.flags.lobbySeen = true; return "煮捲心菜的氣味混著舊地毯。整棟樓都在用一種味道說話。"; } },
+        { id: "bb", x: 14, y: 2, w: 1, h: 2, label: "老大哥海報", kind: "examine",
+          text: "海報貼在樓梯轉角。眼睛從上往下看，像在數你爬了幾級。" },
+        { id: "stair", x: 13, y: 8, w: 2, h: 1, label: "樓梯", kind: "examine",
+          text: () => { state.flags.lobbySeen = true; return "水泥階梯缺了一角。扶手黏黏的。上面有燈光與標語的影子。"; } },
+      ],
+      drawExtra(ctx, cam) {
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++)
+            if ((x + y) % 4 === 0)
+              px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, "#343230");
+        // cabbage steam near left
+        drawSteamPuffs(3 * TILE - cam.x + 4, 2 * TILE - cam.y + 2, 8, 4);
+        ctx.fillStyle = "rgba(180,200,160,.22)";
+        for (let i = 0; i < 8; i++) {
+          const sx = 3 * TILE - cam.x + ((state.tick + i * 9) % 24);
+          const sy = 2 * TILE - cam.y - ((state.tick + i * 5) % 20);
+          ctx.fillRect(sx, sy, 4, 2);
+        }
+        drawPaperFlutter(cam, W, H, 2);
+        // broken lift
+        const lx = 8 * TILE - cam.x, ly = 7 * TILE - cam.y;
+        px(lx - 2, ly - 18, 36, 34, "#1a1a1a");
+        px(lx, ly - 16, 16, 30, "#2a2a2a");
+        px(lx + 16, ly - 16, 14, 30, "#222");
+        px(lx + 4, ly - 12, 8, 2, C.red);
+        px(lx + 20, ly - 4, 6, 10, "#111");
+        // stairs
+        for (let i = 0; i < 5; i++) {
+          px(13 * TILE - cam.x + i * 2, 8 * TILE - cam.y - i * 3, 28 - i * 2, 3, "#3a3834");
+        }
+        drawBBPoster(14 * TILE, 2 * TILE, cam, 24);
+        // pot
+        px(3 * TILE - cam.x + 2, 2 * TILE - cam.y + 6, 12, 8, "#4a5a3a");
+        px(3 * TILE - cam.x + 4, 2 * TILE - cam.y + 4, 8, 4, "#5a6a4a");
+        px(3 * TILE - cam.x + 6, 2 * TILE - cam.y + 8, 4, 2, "#3a4a2a");
+        /* damp wall streak + trash */
+        px(6 * TILE - cam.x, 2 * TILE - cam.y, 2, 20, "rgba(60,80,60,.25)");
+        px(11 * TILE - cam.x + 4, 8 * TILE - cam.y + 8, 5, 3, "#3a342e");
+        px(12 * TILE - cam.x, 8 * TILE - cam.y + 10, 3, 2, "#2a2820");
+        drawFloorScuffs(cam, W, H, 9);
+        drawDust(cam, W, H, 9);
+        /* broken lift cables + sparks + stair edge wear */
+        px(lx + 8, ly - 16, 1, 14, "#555");
+        px(lx + 12, ly - 14, 1, 12, "#444");
+        px(lx + 10, ly - 8, 3, 1, "#666");
+        drawElevatorSparks(lx + 2, ly - 12);
+        for (let i = 0; i < 5; i++) {
+          px(13 * TILE - cam.x + i * 2, 8 * TILE - cam.y - i * 3 + 2, 10, 1, "#2a2824");
+        }
+        px(13 * TILE - cam.x + 2, 8 * TILE - cam.y + 2, 4, 1, "#5a5040");
+        drawSteamPuffs(3 * TILE - cam.x + 2, 2 * TILE - cam.y, 5, 5);
+      },
+    };
+  }
+
+  function makeCorridor() {
+    const W = 22, H = 9;
+    const g = borderWalls(solidGrid(W, H, 0));
+    for (const x of [6, 11, 16]) { g[3][x] = 1; g[5][x] = 1; }
+    return {
+      id: "corridor",
+      name: "勝利大廈 · 走廊",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 4 * TILE },
+      exits: [
+        { x: 1, y: 3, w: 1, h: 3, to: "lobby", spawnX: 16 * TILE, spawnY: 5 * TILE, need: () => true },
+        { x: 20, y: 3, w: 1, h: 3, to: "ministry", spawnX: 2 * TILE, spawnY: 6 * TILE,
+          need: () => state.flags.postersRead >= 3,
+          blockedMsg: "門邊的巡邏員咳了一聲。牆上的字似乎還沒看完。" },
+      ],
+      objects: [
+        { id: "p1", x: 5, y: 1, w: 2, h: 1, label: "標語：戰爭即和平", kind: "poster", order: 0,
+          front: "戰爭即和平", back: "衝突被說成安定。你讀完，仍須點頭。" },
+        { id: "p2", x: 10, y: 1, w: 2, h: 1, label: "標語：自由即奴役", kind: "poster", order: 1,
+          front: "自由即奴役", back: "服從被說成自由。走廊燈管嗡嗡作響。" },
+        { id: "p3", x: 15, y: 1, w: 2, h: 1, label: "標語：無知即力量", kind: "poster", order: 2,
+          front: "無知即力量", back: "不問被說成強大。電梯口仍貼著『暫停服務』。" },
+        { id: "bb1", x: 8, y: 1, w: 1, h: 1, label: "老大哥海報", kind: "examine",
+          text: "眼睛跟著你。無論你站在左側或右側，目光的距離似乎永遠相等。" },
+        { id: "bb2", x: 13, y: 1, w: 1, h: 1, label: "老大哥海報", kind: "examine",
+          text: "同一張臉，印了一整層樓。紙角捲起，下面露出更舊的一層——還是同一張臉。" },
+        { id: "guard", x: 18, y: 4, w: 1, h: 1, label: "巡邏員", kind: "npc", style: "guard",
+          lines: () => state.flags.postersRead >= 3
+            ? [
+                ["巡邏員", "標語看完了？進去吧。紀錄部不等人。"],
+                ["巡邏員", "走路別東張西望。眼睛是用來看老大哥的。"],
+                ["巡邏員", "走廊裡的回聲也會被記錄。別練習多餘的句子。"],
+              ]
+            : [
+                ["巡邏員", "牆上的字，一個也不能漏。"],
+                ["巡邏員", "戰爭即和平。自由即奴役。無知即力量。複誦。"],
+                ["巡邏員", "……夠了。繼續看。"],
+                ["巡邏員", "漏看一條，等於思想鬆動。思想鬆動，等於危險。"],
+              ] },
+        { id: "lift", x: 3, y: 7, w: 2, h: 1, label: "壞掉的電梯", kind: "examine",
+          text: "電梯門卡住一半。紙牌寫著：請走樓梯。氣味更濃——像整棟樓的胃。" },
+      ],
+      drawExtra(ctx, cam) {
+        for (let x = 1; x < W - 1; x++) {
+          const px0 = x * TILE - cam.x, py0 = 1 * TILE - cam.y;
+          if ((x % 3) === 0) {
+            px(px0, py0, TILE, TILE, C.wallBrick);
+            px(px0, py0 + 7, TILE, 1, "#1a1e22");
+          }
+        }
+        ctx.fillStyle = "#2e3136";
+        for (let i = 0; i < 8; i++) {
+          const fx = (3 + i * 2) * TILE - cam.x + (i % 3) * 3;
+          const fy = 4 * TILE - cam.y + 10 + (i % 2) * 2;
+          ctx.fillRect(fx, fy, 6 + (i % 3), 1);
+        }
+        /* wall cracks + floor scuffs + more posters frame */
+        for (let i = 0; i < 3; i++) {
+          px((7 + i * 5) * TILE - cam.x + 2, 2 * TILE - cam.y + 4, 1, 10, "#1a1c20");
+        }
+        px(4 * TILE - cam.x, 6 * TILE - cam.y + 8, 8, 2, "rgba(0,0,0,.25)");
+        drawFloorScuffs(cam, W, H, 3);
+        drawWallGrime(cam, W, H);
+        drawDust(cam, W, H, 2);
+        drawPaperFlutter(cam, W, H, 2);
+        /* flickering strip lights */
+        for (let i = 0; i < 4; i++) {
+          const on = ((state.tick + i * 17) % 40) > 3;
+          if (!on) continue;
+          const lx = (4 + i * 4) * TILE - cam.x;
+          px(lx, 1 * TILE - cam.y + 2, 10, 2, "#c9a84a");
+          drawLampFlicker(lx - 4, 2 * TILE - cam.y, 18, 40, true);
+        }
+        const posters = [
+          { x: 5, c: "#5a1a1a", glyph: ["##  ##", "# ## #", "##  ##", " #### ", "#    #"] },
+          { x: 10, c: "#1a3a1a", glyph: ["##### ", "#     ", "####  ", "#     ", "##### "] },
+          { x: 15, c: "#1a1a4a", glyph: ["#   # ", "## ## ", "# # # ", "#   # ", "#   # "] },
+        ];
+        posters.forEach((p, i) => {
+          const flipped = state.flags.posterOrder.includes(i);
+          const ppx = p.x * TILE - cam.x, ppy = 1 * TILE - cam.y;
+          px(ppx - 1, ppy - 1, 34, 18, "#111");
+          px(ppx, ppy, 32, 16, flipped ? "#3a3a3a" : p.c);
+          px(ppx + 2, ppy + 2, 28, 2, C.red);
+          if (!flipped) pixelGlyph(ppx + 10, ppy + 5, p.glyph, C.white);
+          else {
+            px(ppx + 4, ppy + 5, 24, 7, C.warn);
+            pixelGlyph(ppx + 10, ppy + 6, ["#  #", " ## ", " #  ", " #  "], "#111");
+          }
+          px(ppx + 14, ppy - 1, 2, 2, C.metal);
+        });
+        drawBBPoster(8 * TILE, 1 * TILE - 2, cam, 24);
+        drawBBPoster(13 * TILE, 1 * TILE - 2, cam, 24);
+        for (const x of [6, 11, 16]) {
+          const ppx = x * TILE - cam.x;
+          px(ppx + 2, 3 * TILE - cam.y, 12, TILE, "#333840");
+          px(ppx + 2, 5 * TILE - cam.y, 12, TILE, "#333840");
+          px(ppx + 4, 3 * TILE - cam.y + 2, 8, 2, "#444850");
+        }
+        const lx = 3 * TILE - cam.x, ly = 7 * TILE - cam.y;
+        px(lx, ly - 8, 32, 24, "#222");
+        px(lx + 2, ly - 6, 14, 20, "#333");
+        px(lx + 16, ly - 6, 12, 20, "#2a2a2a");
+        px(lx + 4, ly - 4, 8, 2, C.red);
+        px(lx + 18, ly, 6, 8, "#1a1a1a");
+        /* brick mortar, puddle reflections, strip housings, poster wear */
+        for (let x = 1; x < W - 1; x++) {
+          if ((x % 3) === 0) {
+            const px0 = x * TILE - cam.x, py0 = 1 * TILE - cam.y;
+            px(px0 + 2, py0 + 3, 4, 1, "#1a1e22");
+            px(px0 + 8, py0 + 10, 5, 1, "#1a1e22");
+          }
+        }
+        for (let i = 0; i < 3; i++) {
+          const px0 = (5 + i * 6) * TILE - cam.x + 4;
+          const py0 = 6 * TILE - cam.y + 8;
+          px(px0, py0, 10, 3, "rgba(40,50,60,.35)");
+          if ((state.tick + i * 11) % 20 < 10)
+            px(px0 + 2, py0 + 1, 4, 1, "rgba(160,180,200,.15)");
+        }
+        for (let i = 0; i < 4; i++) {
+          const lx2 = (4 + i * 4) * TILE - cam.x;
+          px(lx2 - 1, 1 * TILE - cam.y + 1, 12, 1, "#555");
+          px(lx2 - 1, 1 * TILE - cam.y + 4, 12, 1, "#333");
+        }
+        posters.forEach((p) => {
+          const ppx = p.x * TILE - cam.x, ppy = 1 * TILE - cam.y;
+          px(ppx + 28, ppy + 12, 3, 2, "#2a1a1a");
+          px(ppx + 2, ppy + 14, 4, 1, "#1a1010");
+        });
+        drawElevatorSparks(lx + 4, ly - 6);
+      },
+    };
+  }
+
+  function makeMinistry() {
+    const W = 18, H = 12;
+    const g = borderWalls(solidGrid(W, H, 0));
+    for (let x = 3; x <= 7; x++) g[4][x] = 1;
+    for (let x = 10; x <= 14; x++) g[4][x] = 1;
+    g[8][8] = 1; g[8][9] = 1;
+    return {
+      id: "ministry",
+      name: "紀錄部 · 隔間",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 6 * TILE },
+      exits: [
+        { x: 1, y: 5, w: 1, h: 2, to: "corridor", spawnX: 18 * TILE, spawnY: 4 * TILE, need: () => true },
+        { x: 16, y: 5, w: 1, h: 2, to: "canteen", spawnX: 2 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.newsFixed >= 3,
+          blockedMsg: "記憶洞還在喘氣。" },
+      ],
+      objects: [
+        { id: "hole", x: 8, y: 8, w: 2, h: 1, label: "記憶洞", kind: "hole" },
+        { id: "wall", x: 6, y: 1, w: 6, h: 1, label: "牆上標題", kind: "examine",
+          text: () => t("牆上大標題：「") + t(state.wallHeadline) + t("」。你改過 ") + state.flags.newsFixed + t(" 則。窗外隱約可見白色金字塔的真理部輪廓。") },
+        { id: "news0", x: 3, y: 6, w: 1, h: 1, label: "新聞紙 A", kind: "news", newsId: 0, wrong: true, title: "巧克力配給減少" },
+        { id: "news1", x: 5, y: 9, w: 1, h: 1, label: "新聞紙 B", kind: "news", newsId: 1, wrong: false, title: "生產達標" },
+        { id: "news2", x: 12, y: 6, w: 1, h: 1, label: "新聞紙 C", kind: "news", newsId: 2, wrong: true, title: "前線失利傳聞" },
+        { id: "news3", x: 14, y: 9, w: 1, h: 1, label: "新聞紙 D", kind: "news", newsId: 3, wrong: true, title: "去年承諾未兌現" },
+        { id: "clerk", x: 15, y: 3, w: 1, h: 1, label: "同事", kind: "npc", style: "clerk",
+          lines: () => state.flags.newsFixed >= 3
+            ? [
+                ["同事", "洞吞得很快。紙片落下去時沒有聲音。"],
+                ["同事", "昨天的標題？不存在。從未存在。"],
+                ["同事", "你改得乾淨。黨喜歡乾淨。"],
+                ["同事", "有人說記憶會痛。我說：痛的是還沒被改乾淨的人。"],
+                ["同事", "午餐鈴響之前，把最後一則『錯誤』送進去。"],
+              ]
+            : [
+                ["同事", "把錯誤丟進記憶洞。別多看第二眼。"],
+                ["同事", "窗外那座金字塔——愈看愈白，愈白愈假……我是說，愈神聖。"],
+                ["同事", "生產數字要對。對了就是真的。"],
+                ["同事", "巧克力減配？那是敵人的謠言。報紙會教你正確的數字。"],
+                ["同事", "手別抖。抖會讓墨水寫出多餘的歷史。"],
+              ] },
+        { id: "pyramid", x: 16, y: 1, w: 1, h: 1, label: "窗外星象", kind: "examine",
+          text: "窗外：真理部的白色金字塔矗立在霧裡。窗框上積著灰。" },
+      ],
+      newsGone: new Set(),
+      drawExtra(ctx, cam) {
+        const bx = 6 * TILE - cam.x, by = 1 * TILE - cam.y;
+        px(bx - 2, by - 2, 100, 20, "#111");
+        px(bx, by, 96, 16, "#222");
+        px(bx + 2, by + 2, 92, 2, C.red);
+        ctx.font = "8px monospace";
+        ctx.fillStyle = C.white;
+        ctx.fillText(t(state.wallHeadline).slice(0, 18), bx + 6, by + 12);
+        if ((state.tick >> 4) % 2 === 0) px(bx + 88, by + 8, 4, 4, C.red);
+        function desk(x, y) {
+          const dx = x * TILE - cam.x, dy = y * TILE - cam.y;
+          px(dx, dy, 5 * TILE, TILE, C.wood);
+          px(dx + 2, dy - 2, 5 * TILE - 4, 2, C.woodLite);
+          px(dx + 8, dy + 2, 10, 8, C.paper);
+          px(dx + 10, dy + 1, 10, 8, "#c8c0a8");
+          px(dx + 12, dy, 8, 7, C.paper);
+          px(dx + 14, dy + 2, 6, 1, C.red);
+          px(dx + 50, dy + 4, 5, 5, "#222");
+          px(dx + 51, dy + 5, 3, 3, "#1a3a5a");
+          px(dx + 60, dy - 6, 4, 8, C.metal);
+        }
+        desk(3, 4); desk(10, 4);
+        const hx = 8 * TILE - cam.x, hy = 8 * TILE - cam.y;
+        px(hx - 2, hy - 2, 36, 20, "#1a1010");
+        px(hx, hy, 32, 16, "#111");
+        const pulse = 0.25 + 0.15 * Math.sin(state.tick / 10);
+        ctx.fillStyle = `rgba(180,40,40,${pulse})`;
+        ctx.beginPath();
+        ctx.ellipse(hx + 16, hy + 8, 14, 7, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#000";
+        ctx.beginPath();
+        ctx.ellipse(hx + 16, hy + 8, 10, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        px(hx + 12, hy + 6, 8, 3, C.redDark);
+        px(hx + 2, hy + 2, 2, 2, C.metal);
+        px(hx + 28, hy + 2, 2, 2, C.metal);
+        ctx.fillStyle = `rgba(255,120,80,${0.4 + pulse})`;
+        for (let i = 0; i < 4; i++) {
+          const ax = hx + 10 + ((state.tick + i * 9) % 12);
+          const ay = hy + 2 - ((state.tick + i * 5) % 10);
+          ctx.fillRect(ax, ay, 1, 1);
+        }
+        const wx = 16 * TILE - cam.x, wy = 1 * TILE - cam.y;
+        px(wx, wy, 14, 14, "#1a2030");
+        px(wx + 2, wy + 2, 10, 10, "#3a4860");
+        ctx.fillStyle = "#c8d0d8";
+        ctx.beginPath();
+        ctx.moveTo(wx + 7, wy + 3);
+        ctx.lineTo(wx + 11, wy + 10);
+        ctx.lineTo(wx + 3, wy + 10);
+        ctx.fill();
+        px(wx + 6, wy + 7, 2, 3, "#8890a0");
+        /* memory hole glow + paper scraps */
+        const hg = 0.2 + 0.15 * Math.sin(state.tick / 6);
+        ctx.fillStyle = `rgba(255,120,40,${hg})`;
+        ctx.fillRect(8 * TILE - cam.x + 4, 8 * TILE - cam.y + 2, 20, 6);
+        px(4 * TILE - cam.x, 7 * TILE - cam.y + 8, 4, 2, C.paper);
+        px(11 * TILE - cam.x + 6, 7 * TILE - cam.y + 2, 5, 3, C.paper);
+        drawFloorScuffs(cam, W, H, 2);
+        drawDust(cam, W, H, 3);
+        drawPaperFlutter(cam, W, H, 3);
+        drawScreenScanlines(bx + 2, by + 2, 92, 12, 1);
+        const papers = [
+          { id: 0, x: 3, y: 6 }, { id: 1, x: 5, y: 9 },
+          { id: 2, x: 12, y: 6 }, { id: 3, x: 14, y: 9 },
+        ];
+        papers.forEach(p => {
+          if (this.newsGone.has(p.id)) return;
+          if (state.flags.carrying === p.id) return;
+          const ppx = p.x * TILE - cam.x + 2, ppy = p.y * TILE - cam.y + 3;
+          px(ppx, ppy, 12, 11, C.paper);
+          px(ppx + 1, ppy + 1, 10, 1, "#bbb");
+          px(ppx + 2, ppy + 4, 8, 1, C.red);
+          px(ppx + 2, ppy + 7, 6, 1, "#999");
+        });
+        /* memory-hole grate + ash, paper stacks, pneumatic tubes */
+        px(hx + 6, hy + 4, 20, 1, C.metal);
+        px(hx + 6, hy + 10, 20, 1, C.metal);
+        for (let i = 0; i < 5; i++) px(hx + 8 + i * 4, hy + 4, 1, 8, "#444");
+        drawAshRise(hx + 12, hy + 2, 6, 3);
+        px(4 * TILE - cam.x + 2, 5 * TILE - cam.y, 10, 3, C.paper);
+        px(4 * TILE - cam.x + 3, 5 * TILE - cam.y - 2, 8, 3, "#c8c0a8");
+        px(11 * TILE - cam.x, 5 * TILE - cam.y + 2, 12, 3, C.paper);
+        px(11 * TILE - cam.x + 1, 5 * TILE - cam.y, 10, 3, "#bbb");
+        px(2 * TILE - cam.x + 4, 2 * TILE - cam.y, 4, 20, C.metal);
+        px(15 * TILE - cam.x, 2 * TILE - cam.y, 4, 18, C.metal);
+        px(2 * TILE - cam.x + 5, 3 * TILE - cam.y + ((state.tick >> 3) % 8), 2, 2, "#1a3a5a");
+        px(15 * TILE - cam.x + 1, 4 * TILE - cam.y - ((state.tick >> 3) % 6), 2, 2, "#1a3a5a");
+        drawPaperFlutter(cam, W, H, 7);
+      },
+    };
+  }
+
+  function makeCanteen() {
+    const W = 16, H = 11;
+    const g = borderWalls(solidGrid(W, H, 0));
+    for (let x = 3; x <= 5; x++) { g[4][x] = 1; g[7][x] = 1; }
+    for (let x = 10; x <= 12; x++) { g[4][x] = 1; g[7][x] = 1; }
+    return {
+      id: "canteen",
+      name: "部內食堂",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 5 * TILE },
+      exits: [
+        { x: 1, y: 4, w: 1, h: 3, to: "ministry", spawnX: 15 * TILE, spawnY: 6 * TILE, need: () => true },
+        { x: 14, y: 4, w: 1, h: 3, to: "square", spawnX: 2 * TILE, spawnY: 8 * TILE,
+          need: () => true,
+          blockedMsg: "走廊那頭有人潮湧動的聲音。" },
+      ],
+      objects: [
+        { id: "cook", x: 13, y: 8, w: 1, h: 1, label: "食堂職員", kind: "npc", style: "clerk",
+          lines: () => state.flags.hateDone
+            ? [
+                ["食堂職員", "湯是灰的。日子也是。"],
+                ["食堂職員", "仇恨過後，盤子總是更空——人卻更飽。奇妙吧？"],
+                ["食堂職員", "勝利牌杜松子酒又來一輪。喉嚨燒過，口號才更亮。"],
+                ["食堂職員", "別把勺子敲太響。敲響會像抗議。"],
+              ]
+            : [
+                ["食堂職員", "鈴快響了。廣場那邊的螢幕比這裡更大。"],
+                ["食堂職員", "燉菜是粉的。湯是灰的。酒是勝利牌的。請排隊。"],
+                ["食堂職員", "今天份量『正確』。正確比好吃更重要。"],
+                ["食堂職員", "賽麥那桌話多。話多的人，字典會先瘦他。"],
+              ] },
+        { id: "syme", x: 5, y: 5, w: 1, h: 1, label: "賽麥", kind: "npc", style: "syme",
+          lines: () => [
+            ["賽麥", "新語第十一版快印好了。詞彙會再瘦一圈。"],
+            ["賽麥", "你想想——當『自由』從字典消失，人還能怎麼想自由？"],
+            ["賽麥", "同義詞是敵人。細緻的詞是敵人。最後只剩最粗的斧頭。"],
+            ["賽麥", "『好』可以變『加好』『加倍好』。壞呢？壞只要一個『不加好』就夠了。"],
+            ["賽麥", "思想的範圍，等於語言的範圍。我們正在把圍牆往裡搬。"],
+            ["賽麥", "美妙極了。不是嗎？"],
+          ] },
+        { id: "parsons", x: 11, y: 5, w: 1, h: 1, label: "派遜斯", kind: "npc", style: "parsons",
+          lines: () => [
+            ["派遜斯", "哈哈！今日配給又調高了——報紙說的。"],
+            ["派遜斯", "孩子們可熱心了，都是小英雄。我以他們為榮！"],
+            ["派遜斯", "有時候他們盯著我看，像在練習『報告』。哈哈——玩笑而已。"],
+            ["派遜斯", "兩分鐘仇恨要開始了吧？廣場上人可多了。"],
+            ["派遜斯", "我睡眠很好。夢裡也喊口號——證明良心乾淨！"],
+            ["派遜斯", "賽麥總愛談詞。詞有什麼好談？黨說什麼，什麼就是詞。"],
+          ] },
+        { id: "eaves", x: 8, y: 5, w: 1, h: 1, label: "鄰桌對話", kind: "banter",
+          beats: [
+            ["賽麥", "巧克力配給？上週明明減過。"],
+            ["派遜斯", "不對不對——一向都是這個數字。報紙寫得很清楚。"],
+            ["賽麥", "記憶是靠不住的。紙才靠得住。"],
+            ["派遜斯", "對對對。紙永遠正確。"],
+            ["賽麥", "仇恨過後，生產數字總會好看一點。"],
+            ["派遜斯", "當然！黨永遠正確。哈哈！"],
+            ["賽麥", "第十一版會刪掉『減配』這個詞。以後就連想『減少』都難。"],
+            ["派遜斯", "刪就刪！少想點，多愛黨。我的孩子們就是這樣教的。"],
+            ["賽麥", "你真幸福。幸福到幾乎不需要語言。"],
+            ["派遜斯", "哈哈！你這話聽起來像讚美。"],
+          ] },
+        { id: "tray", x: 4, y: 8, w: 1, h: 1, label: "金屬餐盤", kind: "examine",
+          text: "金屬盤裡是粉色燉菜與灰湯。勺子刮過盤底，發出黨員們都認識的那種聲音。勝利牌杜松子酒的氣味混在蒸汽裡。" },
+        { id: "poster_c", x: 7, y: 1, w: 2, h: 1, label: "食堂標語", kind: "examine",
+          text: "『效忠從每一口湯開始。』字跡被蒸汽燻得發黃。角落還有一行小字：浪費糧食即浪費愛國。" },
+      ],
+      drawExtra(ctx, cam) {
+        // small wall screen (not the Hate focus)
+        const sx = 7 * TILE - cam.x, sy = 1 * TILE - cam.y;
+        px(sx - 4, sy - 2, 56, 20, "#1a1a1a");
+        px(sx, sy, 48, 16, "#2a2a2a");
+        px(sx + 4, sy + 3, 40, 10, "#3a4040");
+        px(sx + 16, sy + 5, 14, 6, "#2a3030");
+        px(sx - 8, sy + 16, 64, 4, "#333");
+        function tableSet(x, y) {
+          const tx = x * TILE - cam.x, ty = y * TILE - cam.y;
+          px(tx - 2, ty + 14, 52, 4, "#3a342e");
+          px(tx, ty, 48, 14, "#4a4038");
+          px(tx + 2, ty + 2, 44, 2, "#5a5048");
+          px(tx + 8, ty + 6, 6, 4, "#888");
+          px(tx + 22, ty + 6, 6, 4, "#888");
+          px(tx + 36, ty + 6, 6, 4, "#777");
+          px(tx + 9, ty + 7, 4, 2, "#a07070");
+          px(tx - 2, ty - 4, 52, 4, "#3a342e");
+        }
+        tableSet(3, 4); tableSet(3, 7); tableSet(10, 4); tableSet(10, 7);
+        ctx.fillStyle = C.steam;
+        for (let i = 0; i < 12; i++) {
+          const stx = 4 * TILE - cam.x + ((state.tick + i * 11) % 48);
+          const sty = 3 * TILE - cam.y - ((state.tick + i * 7) % 24);
+          ctx.fillRect(stx, sty, 3, 2);
+        }
+        drawSteamPuffs(5 * TILE - cam.x, 3 * TILE - cam.y, 7, 4);
+        drawScreenScanlines(sx + 4, sy + 3, 40, 10, 0.6);
+        ctx.fillStyle = "#2a2824";
+        for (let i = 0; i < 12; i++) {
+          ctx.fillRect((2 + i) * TILE - cam.x + 3, 9 * TILE - cam.y + (i % 5), 5, 1);
+        }
+        /* spilled stew stain + tray stack */
+        px(6 * TILE - cam.x + 2, 8 * TILE - cam.y + 6, 10, 3, "rgba(120,70,70,.35)");
+        px(12 * TILE - cam.x, 8 * TILE - cam.y + 2, 8, 2, "#666");
+        px(12 * TILE - cam.x + 1, 8 * TILE - cam.y, 6, 2, "#777");
+        px(12 * TILE - cam.x + 2, 8 * TILE - cam.y - 2, 4, 2, "#888");
+        drawFloorScuffs(cam, W, H, 4);
+        drawDust(cam, W, H, 4);
+        drawPaperFlutter(cam, W, H, 4);
+        /* tray shine, stew steam, bench scuffs, wall grease */
+        px(4 * TILE - cam.x + 8, 8 * TILE - cam.y + 4, 8, 5, "#888");
+        px(4 * TILE - cam.x + 9, 8 * TILE - cam.y + 5, 6, 1, "#c8c8c8");
+        px(4 * TILE - cam.x + 10, 8 * TILE - cam.y + 6, 4, 2, "#a07070");
+        drawSteamPuffs(4 * TILE - cam.x + 10, 8 * TILE - cam.y + 2, 4, 6);
+        drawObjectGlint(4 * TILE - cam.x + 12, 8 * TILE - cam.y + 5, 70, 4);
+        for (let i = 0; i < 6; i++)
+          px((3 + i) * TILE - cam.x + 2, 9 * TILE - cam.y + 4, 4, 1, "#2a2420");
+        px(2 * TILE - cam.x, 2 * TILE - cam.y, 3, 24, "rgba(80,70,50,.25)");
+        px(14 * TILE - cam.x + 4, 3 * TILE - cam.y, 4, 20, "rgba(60,50,40,.3)");
+        drawSteamPuffs(10 * TILE - cam.x + 4, 4 * TILE - cam.y, 5, 8);
+      },
+    };
+  }
+
+  function makeNewspeak() {
+    const W = 12, H = 10;
+    const g = borderWalls(solidGrid(W, H, 0));
+    g[4][5] = 1; g[4][6] = 1;
+    return {
+      id: "newspeak",
+      name: "新語終端室",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 5 * TILE },
+      exits: [
+        { x: 1, y: 4, w: 1, h: 2, to: "square", spawnX: 16 * TILE, spawnY: 8 * TILE, need: () => true },
+        { x: 10, y: 4, w: 1, h: 2, to: "apartment2", spawnX: 7 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.newspeakDone,
+          blockedMsg: "終端的綠字還在閃。詞還沒被削乾淨。" },
+      ],
+      objects: [
+        { id: "term", x: 5, y: 3, w: 2, h: 1, label: "新語終端", kind: "newspeak" },
+        { id: "linguist", x: 8, y: 6, w: 1, h: 1, label: "詞彙員", kind: "npc", style: "syme",
+          lines: () => [
+            ["詞彙員", "詞愈少，想得愈窄。這不是缺陷，是設計。"],
+            ["詞彙員", "我們刪『優秀』『卓越』『傑出』——最後只留『好』與『加倍好』。"],
+            ["詞彙員", "你聽：思想罪會變得難以發音。難以發音，就難以犯罪。"],
+            ["詞彙員", "賽麥說得對：同義詞是敵人。細緻是敵人。斧頭才乾淨。"],
+            ["詞彙員", "終端會提示你刪哪幾個。別心軟——心軟也是舊詞。"],
+            ["詞彙員", "第十一版印好後，上一版就不曾存在。記住這句。"],
+          ] },
+        { id: "dict", x: 3, y: 7, w: 1, h: 1, label: "詞彙第十一版", kind: "examine",
+          text: "封面寫著：刪去多餘的同義詞。紙邊已經發黃。目錄比上一版薄了三分之一——像一本逐漸消瘦的病歷。空白頁愈多，思想的籠子愈小。" },
+      ],
+      drawExtra(ctx, cam) {
+        const tx = 5 * TILE - cam.x, ty = 3 * TILE - cam.y;
+        px(tx, ty + 10, 32, 10, C.metal);
+        px(tx + 2, ty + 12, 6, 2, "#444");
+        px(tx + 2, ty - 2, 28, 16, "#222");
+        px(tx + 4, ty, 24, 12, "#0a1a0a");
+        const glow = state.flags.newspeakDone ? "#4a8a4a" : C.glow;
+        ctx.fillStyle = glow;
+        ctx.globalAlpha = 0.85 + 0.15 * Math.sin(state.tick / 8);
+        ctx.fillRect(tx + 6, ty + 2, 20, 2);
+        ctx.fillRect(tx + 6, ty + 5, 14, 2);
+        ctx.fillRect(tx + 6, ty + 8, 10, 2);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "rgba(0,0,0,.3)";
+        for (let i = 0; i < 6; i++) ctx.fillRect(tx + 4, ty + i * 2, 24, 1);
+        px(tx + 4, ty + 14, 24, 4, "#333");
+        for (let i = 0; i < 6; i++) px(tx + 6 + i * 3, ty + 15, 2, 2, "#555");
+        const dx = 3 * TILE - cam.x, dy = 7 * TILE - cam.y;
+        px(dx, dy + 4, 14, 10, "#4a3a2a");
+        px(dx + 1, dy + 2, 12, 10, "#5a4a3a");
+        px(dx + 2, dy, 10, 10, "#6a5a4a");
+        px(dx + 3, dy + 3, 8, 1, C.red);
+        px(1 * TILE - cam.x + 4, 2 * TILE - cam.y, 20, 28, "#1a2020");
+        px(1 * TILE - cam.x + 6, 2 * TILE - cam.y + 4, 16, 2, C.glow);
+        px(1 * TILE - cam.x + 6, 2 * TILE - cam.y + 10, 12, 2, C.glow);
+        px(1 * TILE - cam.x + 6, 2 * TILE - cam.y + 16, 8, 2, C.glow);
+        /* terminal glow */
+        const tg = 0.15 + 0.1 * Math.sin(state.tick / 8);
+        ctx.fillStyle = `rgba(80,140,100,${tg})`;
+        ctx.fillRect(5 * TILE - cam.x, 2 * TILE - cam.y, 32, 20);
+        px(4 * TILE - cam.x + 4, 6 * TILE - cam.y, 6, 1, "#445");
+        drawFloorScuffs(cam, W, H, 6);
+        drawDust(cam, W, H, 5);
+        drawPaperFlutter(cam, W, H, 6);
+        drawScreenScanlines(tx + 4, ty, 24, 12, 1);
+        /* dictionary spine + key glints */
+        px(dx + 8, dy + 1, 2, 8, "#8a6a4a");
+        drawObjectGlint(tx + 18, ty + 4, 70, 15);
+        for (let i = 0; i < 3; i++)
+          px(tx + 8 + i * 5, ty + 16, 2, 1, ((state.tick + i) % 20 < 4) ? "#8fce8f" : "#555");
+      },
+    };
+  }
+
+  function makeApartment2() {
+    const base = makeApartment();
+    base.id = "apartment2";
+    base.name = "勝利大廈 · 夜晚房間";
+    base.exits = [
+      { x: 12, y: 5, w: 1, h: 2, to: "meadow", spawnX: 2 * TILE, spawnY: 8 * TILE,
+        need: () => state.flags.diaryDone,
+        blockedMsg: "抽屜縫裡還透著紙的氣味。紙上的字還熱著。" },
+    ];
+    base.objects = base.objects.map(o => {
+      if (o.kind === "diary") return { ...o, locked: () => false };
+      if (o.kind === "telescreen") return { ...o, kind: "examine", text: "電幕仍亮。你調暗過，但從未真正關掉。夜晚的聲音更近。" };
+      return o;
+    });
+    const oldDraw = base.drawExtra;
+    base.drawExtra = function (ctx, cam) {
+      oldDraw.call(this, ctx, cam);
+      ctx.fillStyle = "rgba(20,20,40,.15)";
+      ctx.fillRect(0, 0, VW, VH);
+    };
+    return base;
+  }
+
+
+  function makeApartmentBook() {
+    const W = 14, H = 11;
+    const g = borderWalls(solidGrid(W, H, 0));
+    g[2][3] = 1; g[2][4] = 1;
+    g[3][3] = 1; g[3][4] = 1;
+    g[2][9] = 1; g[2][10] = 1;
+    g[7][2] = 1;
+    return {
+      id: "apartment_book",
+      name: "勝利大廈 · 房間（讀《兄弟團》之書）",
+      w: W, h: H, tiles: g,
+      spawn: { x: 7 * TILE, y: 6 * TILE },
+      exits: [
+        { x: 12, y: 5, w: 1, h: 2, to: "secret_room", spawnX: 2 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.bookReadDone,
+          blockedMsg: "厚書還攤在桌上。紙頁的氣味比杜松子酒更刺。" },
+      ],
+      objects: [
+        { id: "telescreen", x: 9, y: 1, w: 2, h: 1, label: "電幕", kind: "examine",
+          text: "電幕仍亮。你把書壓在膝上，綠光從頁緣滲過來——它看不見字，卻看得見你的臉，以及你假裝平靜的眨眼。" },
+        { id: "book", x: 6, y: 5, w: 1, h: 1, label: "厚書", kind: "brotherhood_book" },
+        { id: "bed", x: 3, y: 2, w: 2, h: 2, label: "床", kind: "examine",
+          text: "窄床。書就攤在被角。走廊的捲心菜氣味像故意提醒你：外面的世界仍在，而且永遠正確。" },
+        { id: "gin", x: 11, y: 7, w: 1, h: 1, label: "勝利牌杜松子酒", kind: "examine",
+          text: "酒還在。可今夜你寧可讓紙的氣味先佔領喉嚨。" },
+        { id: "bbwall", x: 1, y: 3, w: 1, h: 2, label: "老大哥海報", kind: "examine",
+          text: "「老大哥在看著你。」書頁上的字與海報上的眼，像兩種互相否定的真實——你同時相信兩者，又同時恐懼兩者。" },
+        { id: "table", x: 5, y: 6, w: 1, h: 1, label: "桌角", kind: "examine",
+          text: () => state.flags.bookReadDone
+            ? "書合上了。你仍覺得有人在頁縫裡呼吸。"
+            : "奧勃良塞給你的書躺在那裡。書脊沒有標題。" },
+      ],
+      drawExtra(ctx, cam) {
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++)
+            if ((x + y) % 3 === 0)
+              px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, "#3a383c");
+        const bx = 3 * TILE - cam.x, by = 2 * TILE - cam.y;
+        px(bx - 2, by - 2, 40, 40, "#2a2420");
+        px(bx, by, 36, 36, "#4a3a32");
+        px(bx + 2, by + 4, 32, 12, "#d0c8b8");
+        const sx = 9 * TILE - cam.x, sy = 1 * TILE - cam.y;
+        px(sx, sy, 32, 16, "#1a2a1a");
+        px(sx + 2, sy + 2, 28, 12, C.screen);
+        const pulse = 0.5 + 0.5 * Math.sin(state.tick / 8);
+        ctx.fillStyle = `rgba(143,206,143,${0.25 + pulse * 0.3})`;
+        ctx.fillRect(sx + 10, sy + 4, 12, 8);
+        drawBBPoster(1 * TILE + 2, 3 * TILE, cam, 22);
+        drawRainWindow(11 * TILE - cam.x, 1 * TILE - cam.y, 24, 14);
+        const kx = 6 * TILE - cam.x + 2, ky = 5 * TILE - cam.y + 6;
+        px(kx, ky, 14, 8, "#2a1a12");
+        px(kx + 1, ky + 1, 12, 6, "#4a2a1a");
+        px(kx + 2, ky + 2, 10, 1, C.paper);
+        px(kx + 2, ky + 4, 8, 1, C.paper);
+        if (!state.flags.bookReadDone) {
+          px(kx + 12, ky - 2, 6, 10, "#3a2218");
+          px(kx + 13, ky - 1, 4, 8, C.paper);
+        }
+        ctx.fillStyle = "rgba(20,20,40,.22)";
+        ctx.fillRect(0, 0, VW, VH);
+        drawDust(cam, W, H, 17);
+      },
+    };
+  }
+
+  function makeGate() {
+    const W = 14, H = 10;
+    const g = borderWalls(solidGrid(W, H, 0));
+    g[3][6] = 1; g[3][7] = 1;
+    g[6][6] = 1; g[6][7] = 1;
+    return {
+      id: "gate",
+      name: "雙重思想門廳",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 5 * TILE },
+      exits: [
+        { x: 1, y: 4, w: 1, h: 2, to: "obrien_flat", spawnX: 12 * TILE, spawnY: 5 * TILE, need: () => true },
+        { x: 12, y: 4, w: 1, h: 2, to: "room101", spawnX: 5 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.doublethinkDone,
+          blockedMsg: "兩扇門都還暗著。同一句話，兩種真實。" },
+      ],
+      objects: [
+        { id: "doorL", x: 4, y: 4, w: 1, h: 2, label: "左門 · 解釋甲", kind: "dthink", side: "L" },
+        { id: "doorR", x: 9, y: 4, w: 1, h: 2, label: "右門 · 解釋乙", kind: "dthink", side: "R" },
+        { id: "plaque", x: 6, y: 2, w: 2, h: 1, label: "銘牌", kind: "examine",
+          text: "銘牌寫著：同一句話，兩種真實。字刻得很深，像怕你遺忘——又像怕你只記得一種。" },
+        { id: "echo", x: 11, y: 7, w: 1, h: 1, label: "回聲", kind: "examine",
+          text: "眼鏡的反光還留在記憶裡。那扇能關掉電幕的門，已經在身後。門後的安靜，比任何噪音都更危險。" },
+      ],
+      dthink: { L: false, R: false, quizDone: false },
+      drawExtra(ctx, cam) {
+        const lit = this.dthink;
+        function ornateDoor(x, y, on) {
+          const dx = x * TILE - cam.x, dy = y * TILE - cam.y;
+          px(dx - 2, dy - 2, 20, 36, "#1a1518");
+          px(dx, dy, 16, 32, on ? "#4a6a4a" : "#3a3038");
+          px(dx + 1, dy + 1, 14, 2, on ? "#8aca8a" : "#5a5058");
+          px(dx + 1, dy + 29, 14, 2, on ? "#8aca8a" : "#5a5058");
+          px(dx + 1, dy + 1, 2, 30, on ? "#6a8a6a" : "#4a4048");
+          px(dx + 13, dy + 1, 2, 30, on ? "#6a8a6a" : "#4a4048");
+          px(dx + 6, dy + 10, 4, 4, C.red);
+          px(dx + 7, dy + 11, 2, 2, on ? C.glow : "#222");
+          px(dx + 12, dy + 16, 2, 4, C.metal);
+          px(dx + 4, dy + 20, 8, 1, on ? "#6a8a6a" : "#4a4048");
+          px(dx + 5, dy + 22, 6, 1, on ? "#6a8a6a" : "#4a4048");
+        }
+        ornateDoor(4, 4, lit.L);
+        ornateDoor(9, 4, lit.R);
+        const cx = 6 * TILE - cam.x, cy = 2 * TILE - cam.y;
+        px(cx, cy, 32, 16, "#222");
+        px(cx + 2, cy + 2, 28, 12, "#3a3530");
+        px(cx + 6, cy + 5, 20, 2, C.white);
+        px(cx + 8, cy + 9, 16, 2, "#aaa");
+        ctx.fillStyle = "#4a4848";
+        for (let i = 0; i < 6; i++) {
+          ctx.fillRect((2 + i * 2) * TILE - cam.x, 7 * TILE - cam.y + i, 20, 1);
+        }
+        drawBBPoster(1 * TILE + 4, 2 * TILE, cam, 20);
+        drawDust(cam, W, H, 6);
+      },
+    };
+  }
+
+  function makeRoom101() {
+    const W = 14, H = 10;
+    const g = borderWalls(solidGrid(W, H, 0));
+    return {
+      id: "room101",
+      name: "房 101",
+      w: W, h: H, tiles: g,
+      spawn: { x: 5 * TILE, y: 5 * TILE },
+      exits: [
+        { x: 1, y: 4, w: 1, h: 2, to: "chestnut", spawnX: 3 * TILE, spawnY: 6 * TILE,
+          need: () => false,
+          blockedMsg: "門在身後合上了。" },
+      ],
+      objects: [
+        { id: "door101", x: 9, y: 3, w: 3, h: 4, label: "鐵籠裝置", kind: "room101" },
+        { id: "obrien101", x: 8, y: 5, w: 1, h: 1, label: "奧勃良", kind: "room101" },
+      ],
+      drawExtra(ctx, cam) {
+        /* harsh white floor / walls */
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++)
+            px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, (x + y) % 2 ? "#2a2e32" : "#24282c");
+        /* ceiling light glare */
+        const pulse = 0.35 + 0.2 * Math.sin(state.tick / 14);
+        ctx.fillStyle = `rgba(220,220,230,${0.08 + pulse * 0.06})`;
+        ctx.fillRect(4 * TILE - cam.x, 1 * TILE - cam.y, 6 * TILE, 3 * TILE);
+        px(6 * TILE - cam.x + 4, 1 * TILE - cam.y, 24, 4, "#d8d8e0");
+        px(6 * TILE - cam.x + 8, 1 * TILE - cam.y + 4, 16, 2, "#aaa");
+
+        /* wall plate 101 */
+        const plx = 10 * TILE - cam.x, ply = 1 * TILE - cam.y + 2;
+        px(plx, ply, 28, 14, "#1a1010");
+        px(plx + 2, ply + 2, 24, 10, "#111");
+        ctx.fillStyle = "#e8e8e8";
+        ctx.font = "10px monospace";
+        ctx.fillText("101", plx + 6, ply + 10);
+
+        /* ---- restraint chair (center-left) ---- */
+        const chx = 4 * TILE - cam.x + 2, chy = 4 * TILE - cam.y + 2;
+        /* chair base / legs */
+        px(chx + 2, chy + 28, 4, 8, "#3a3a3a");
+        px(chx + 18, chy + 28, 4, 8, "#3a3a3a");
+        px(chx, chy + 22, 26, 8, "#4a4a4a");
+        px(chx + 1, chy + 23, 24, 6, "#5a5a5a");
+        /* backrest */
+        px(chx + 2, chy + 2, 22, 22, "#3a3a42");
+        px(chx + 4, chy + 4, 18, 18, "#2a2a32");
+        px(chx + 6, chy + 6, 14, 3, "#555");
+        px(chx + 6, chy + 12, 14, 3, "#555");
+        /* armrests */
+        px(chx - 2, chy + 14, 6, 12, "#4a4a4a");
+        px(chx + 22, chy + 14, 6, 12, "#4a4a4a");
+
+        /* ---- Winston strapped in ---- */
+        const wx = chx + 8, wy = chy + 6;
+        /* torso */
+        px(wx, wy + 8, 10, 12, C.shirt);
+        px(wx + 1, wy + 8, 2, 10, "#2a3548");
+        px(wx + 7, wy + 8, 2, 10, "#2a3548");
+        /* head */
+        px(wx + 2, wy, 6, 8, C.skin);
+        px(wx + 2, wy, 6, 3, C.hair);
+        px(wx + 3, wy + 4, 1, 1, C.black);
+        px(wx + 6, wy + 4, 1, 1, C.black);
+        px(wx + 4, wy + 6, 2, 1, "#8a6060"); /* strained mouth */
+        /* legs forward on seat */
+        px(wx + 1, wy + 18, 3, 8, C.pants);
+        px(wx + 6, wy + 18, 3, 8, C.pants);
+        px(wx + 1, wy + 24, 3, 2, "#1a1a1a");
+        px(wx + 6, wy + 24, 3, 2, "#1a1a1a");
+        /* wrist straps */
+        px(chx - 1, chy + 16, 8, 3, "#6a3030");
+        px(chx + 19, chy + 16, 8, 3, "#6a3030");
+        px(chx, chy + 17, 6, 1, C.metal);
+        px(chx + 20, chy + 17, 6, 1, C.metal);
+        /* chest strap */
+        px(wx - 1, wy + 12, 12, 3, "#6a3030");
+        px(wx, wy + 13, 10, 1, C.metal);
+        /* ankle straps */
+        px(wx, wy + 22, 4, 2, "#6a3030");
+        px(wx + 6, wy + 22, 4, 2, "#6a3030");
+        /* sweat / strain glint */
+        if ((state.tick >> 3) % 2 === 0) px(wx + 7, wy + 3, 1, 1, "#fff");
+
+        /* ---- O'Brien standing, interrogating (right of chair) ---- */
+        const ox = 8 * TILE - cam.x + 2, oy = 4 * TILE - cam.y + 4;
+        ctx.fillStyle = "rgba(0,0,0,.35)";
+        ctx.fillRect(ox + 1, oy + 26, 12, 2);
+        /* body — taller stance */
+        px(ox, oy + 10, 12, 16, "#2a3040");
+        px(ox + 1, oy + 10, 10, 2, "#1a2030");
+        px(ox + 9, oy + 12, 3, 3, C.red); /* party sash */
+        /* head + glasses */
+        px(ox + 3, oy + 2, 7, 8, C.skin);
+        px(ox + 3, oy + 2, 7, 3, "#1a1a1a");
+        px(ox + 3, oy + 5, 3, 2, "#c8d0d8");
+        px(ox + 7, oy + 5, 3, 2, "#c8d0d8");
+        px(ox + 4, oy + 5, 1, 1, C.black);
+        px(ox + 8, oy + 5, 1, 1, C.black);
+        /* arm raised toward cage / Winston */
+        px(ox - 4, oy + 12, 5, 2, "#2a3040");
+        px(ox - 6, oy + 11, 3, 3, C.skin);
+        /* other arm at side */
+        px(ox + 11, oy + 12, 3, 8, "#2a3040");
+        px(ox + 12, oy + 18, 2, 2, C.skin);
+
+        /* ---- rat cage apparatus near Winston's face ---- */
+        const cx = 7 * TILE - cam.x - 2, cy = 3 * TILE - cam.y + 6;
+        px(cx - 2, cy - 2, 34, 44, "#0a0606");
+        px(cx, cy, 30, 40, "#1a1010");
+        /* cage face mask frame */
+        px(cx + 4, cy + 4, 22, 26, "#0a0a0a");
+        for (let i = 0; i < 5; i++) px(cx + 6 + i * 4, cy + 6, 2, 22, "#444");
+        px(cx + 4, cy + 4, 22, 2, C.metal);
+        px(cx + 4, cy + 28, 22, 2, C.metal);
+        px(cx + 4, cy + 4, 2, 26, C.metal);
+        px(cx + 24, cy + 4, 2, 26, C.metal);
+        const bob = Math.sin(state.tick / 8) * 2;
+        function critter(rx, ry) {
+          px(rx, ry, 7, 4, "#2a2a2a");
+          px(rx + 5, ry - 1, 3, 3, "#2a2a2a");
+          px(rx - 2, ry + 1, 3, 1, "#3a3a3a");
+          px(rx + 7, ry, 1, 1, C.red);
+        }
+        critter(cx + 8, cy + 16 + bob);
+        critter(cx + 14, cy + 20 - bob);
+        /* hinge arm connecting cage toward face */
+        px(cx - 8, cy + 14, 8, 3, C.metal);
+        px(cx - 10, cy + 12, 4, 7, "#3a3a3a");
+        const rp = 0.25 + 0.25 * Math.sin(state.tick / 10);
+        ctx.fillStyle = `rgba(200,40,40,${rp})`;
+        ctx.fillRect(cx + 10, cy + 32, 10, 4);
+
+        /* floor drain + wall bolts + shadow pool */
+        px(6 * TILE - cam.x + 4, 8 * TILE - cam.y + 4, 8, 4, "#1a1a1a");
+        px(6 * TILE - cam.x + 6, 8 * TILE - cam.y + 5, 4, 2, "#0a0a0a");
+        for (const bx of [2, 5, 11]) {
+          px(bx * TILE - cam.x + 6, 2 * TILE - cam.y + 8, 2, 2, C.metal);
+        }
+        ctx.fillStyle = "rgba(0,0,0,.35)";
+        ctx.fillRect(4 * TILE - cam.x, 6 * TILE - cam.y + 4, 28, 6);
+        /* strobe flicker + dust motes in harsh light */
+        if (((state.tick * 2) % 53) < 4) {
+          ctx.fillStyle = "rgba(255,255,255,.1)";
+          ctx.fillRect(0, 0, VW, VH);
+        }
+        ctx.fillStyle = "rgba(255,220,200,.4)";
+        for (let i = 0; i < 10; i++) {
+          const mx = ((i * 41 + state.tick) % (W * TILE - 8)) + 4;
+          const my = ((i * 23 + (state.tick >> 1)) % (H * TILE - 8)) + 4;
+          ctx.fillRect(mx - cam.x, my - cam.y, 1, 1);
+        }
+        /* third + fourth rat lively motion */
+        critter(cx + 11, cy + 12 + ((state.tick >> 2) % 3));
+        critter(cx + 6, cy + 22 + Math.sin(state.tick / 6) * 2);
+        /* thicker cage bars + extra bolts + coat folds */
+        for (let i = 0; i < 5; i++) px(cx + 5 + i * 4, cy + 6, 3, 22, "#555");
+        for (const bx2 of [2, 4, 7, 10, 12]) {
+          px(bx2 * TILE - cam.x + 4, 2 * TILE - cam.y + 4, 2, 2, C.metal);
+          px(bx2 * TILE - cam.x + 8, 8 * TILE - cam.y + 2, 2, 2, C.metal);
+        }
+        px(ox + 2, oy + 14, 8, 1, "#1a2030");
+        px(ox + 3, oy + 18, 6, 1, "#1a2030");
+        px(ox + 1, oy + 22, 9, 1, "#222830");
+        /* drain drip */
+        if ((state.tick % 30) < 8)
+          px(6 * TILE - cam.x + 8, 8 * TILE - cam.y + ((state.tick % 30) >> 1), 1, 2, "#3a4a4a");
+        drawFloorScuffs(cam, W, H, 7);
+        drawDust(cam, W, H, 7);
+      },
+    };
+  }
+
+  function makeChestnut() {
+    const W = 14, H = 10;
+    const g = borderWalls(solidGrid(W, H, 0));
+    for (let x = 3; x <= 5; x++) g[5][x] = 1;
+    for (let x = 8; x <= 10; x++) g[5][x] = 1;
+    return {
+      id: "chestnut",
+      name: "栗樹咖啡館",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 5 * TILE },
+      exits: [],
+      objects: [
+        { id: "table", x: 6, y: 4, w: 2, h: 2, label: "角落桌", kind: "cafe" },
+        { id: "chess", x: 9, y: 6, w: 1, h: 1, label: "棋盤", kind: "examine",
+          text: "棋子擺好了。沒有人真的在下棋。窗外的雨還在下，像電幕換了一種語氣。" },
+        { id: "bbcafe", x: 1, y: 2, w: 1, h: 2, label: "牆上的臉", kind: "examine",
+          text: "老大哥的臉掛在每一面牆。咖啡館裡沒有人抬頭——因為抬頭也不需要：你已經被看見了。" },
+        { id: "ruin1", x: 3, y: 7, w: 1, h: 1, label: "沉默的男人", kind: "npc", style: "ruin",
+          lines: () => [
+            ["沉默的男人", "他曾經是黨內的人。現在只喝杜松子酒。"],
+            ["沉默的男人", "……棋子移動時，他的眼睛沒有跟上。"],
+            ["沉默的男人", "（極輕）……眼淚有什麼用。"],
+            ["沉默的男人", "他們說：勝利。勝利。勝利。酒卻愈來愈難喝。"],
+          ] },
+        { id: "ruin2", x: 11, y: 7, w: 1, h: 1, label: "破鼻的男人", kind: "npc", style: "ruin",
+          lines: () => [
+            ["破鼻的男人", "鼻子歪了。聲音像從很遠的地方傳來。"],
+            ["破鼻的男人", "我們從前……不。沒有從前。"],
+            ["破鼻的男人", "二加二等於五。你說對了嗎？說對了就好。"],
+            ["破鼻的男人", "說錯了也沒關係——他們會教你說對。"],
+          ] },
+        { id: "ruin3", x: 5, y: 3, w: 1, h: 1, label: "空眼神的男人", kind: "npc", style: "ruin",
+          lines: () => [
+            ["空眼神的男人", "他看著窗外的雨，嘴唇動了一下，什麼也沒說。"],
+            ["空眼神的男人", "……愛。愛。愛。"],
+            ["空眼神的男人", "老大哥。老大哥。老大哥。"],
+            ["空眼神的男人", "（忽然微笑）今天的雨，很正確。"],
+          ] },
+      ],
+      drawExtra(ctx, cam) {
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++)
+            if ((x + y) % 3 === 0)
+              px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, "#3a3834");
+        drawRainWindow(3 * TILE - cam.x, 1 * TILE - cam.y, 36, 18);
+        drawRainWindow(9 * TILE - cam.x, 1 * TILE - cam.y, 36, 18);
+        function cafeTable(x, y) {
+          const tx = x * TILE - cam.x, ty = y * TILE - cam.y;
+          px(tx, ty, 32, 20, "#4a3a2a");
+          px(tx + 2, ty + 2, 28, 2, "#5a4a3a");
+          px(tx + 14, ty + 20, 4, 8, "#3a2a1a");
+          px(tx + 6, ty + 8, 5, 7, C.gin);
+          px(tx + 7, ty + 6, 3, 3, "#dde8c0");
+          px(tx + 18, ty + 6, 10, 10, "#d0c8b0");
+          for (let i = 0; i < 4; i++)
+            for (let j = 0; j < 4; j++)
+              if ((i + j) % 2 === 0) px(tx + 18 + i * 2 + 1, ty + 6 + j * 2 + 1, 2, 2, "#333");
+        }
+        cafeTable(3, 5); cafeTable(8, 5);
+        const mx = 6 * TILE - cam.x, my = 4 * TILE - cam.y;
+        px(mx - 2, my - 2, 40, 36, "#2a2218");
+        px(mx, my, 36, 28, "#5a4a38");
+        px(mx + 4, my + 8, 6, 8, C.gin);
+        px(mx + 20, my + 6, 12, 12, C.paper);
+        px(mx + 22, my + 8, 8, 1, "#999");
+        drawBBPoster(1 * TILE + 2, 2 * TILE, cam, 26);
+        drawBBPoster(12 * TILE - 4, 2 * TILE, cam, 26);
+        px(7 * TILE - cam.x + 6, 1 * TILE - cam.y, 4, 10, C.metal);
+        px(7 * TILE - cam.x + 2, 1 * TILE - cam.y + 10, 12, 6, "#c9a84a");
+        drawLampFlicker(5 * TILE - cam.x, 2 * TILE - cam.y, 5 * TILE, 5 * TILE, true);
+        drawSteamPuffs(mx + 8, my + 4, 5, 8);
+        /* empty-eyed patrons micro-bob */
+        for (let i = 0; i < 3; i++) {
+          const pb = Math.sin((state.tick + i * 19) / 18) > 0.45 ? -1 : 0;
+          const px0 = (2 + i * 4) * TILE - cam.x + 4;
+          const py0 = 7 * TILE - cam.y + 2 + pb;
+          px(px0, py0, 8, 12, "#2a2420");
+          px(px0 + 2, py0 - 4, 5, 5, "#c4a484");
+          px(px0 + 2, py0 - 2, 1, 1, "#111");
+          px(px0 + 5, py0 - 2, 1, 1, "#111");
+        }
+        drawDust(cam, W, H, 8);
+        drawPaperFlutter(cam, W, H, 8);
+        /* chess micro-nudge, gin glint, rain-lit table edge */
+        const nudge = ((state.tick >> 4) % 5) === 0 ? 1 : 0;
+        px(9 * TILE - cam.x + 6 + nudge, 6 * TILE - cam.y + 8, 2, 2, "#222");
+        px(9 * TILE - cam.x + 10, 6 * TILE - cam.y + 10 + nudge, 2, 2, "#eee");
+        drawObjectGlint(3 * TILE - cam.x + 10, 5 * TILE - cam.y + 10, 100, 12);
+        px(6 * TILE - cam.x + 2, 4 * TILE - cam.y + 26, 30, 1, "rgba(200,180,120,.12)");
+        /* hanging lamp sway */
+        const csw = Math.sin(state.tick / 24) > 0.4 ? 1 : 0;
+        px(7 * TILE - cam.x + 6 + csw, 1 * TILE - cam.y, 4, 10, C.metal);
+      },
+    };
+  }
+
+
+  function makeJunkshop() {
+    const W = 16, H = 11;
+    const g = borderWalls(solidGrid(W, H, 0));
+    for (let x = 3; x <= 5; x++) g[3][x] = 1;
+    for (let x = 9; x <= 12; x++) g[3][x] = 1;
+    g[7][7] = 1; g[7][8] = 1;
+    return {
+      id: "junkshop",
+      name: "查林頓舊貨鋪",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 5 * TILE },
+      exits: [
+        { x: 1, y: 4, w: 1, h: 2, to: "meadow", spawnX: 15 * TILE, spawnY: 8 * TILE, need: () => true },
+        { x: 14, y: 4, w: 1, h: 3, to: "secret_room", spawnX: 2 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.junkshopDone,
+          blockedMsg: "樓上的灰塵還沒踩過。" },
+      ],
+      objects: [
+        { id: "charrington", x: 6, y: 5, w: 1, h: 1, label: "查林頓先生", kind: "charrington_talk", style: "charrington" },
+        { id: "shelves", x: 3, y: 3, w: 3, h: 1, label: "積灰貨架", kind: "examine",
+          text: "貨架上擺著舊版畫、殘缺的茶杯、發黃的樂譜。灰塵像一層薄雪。有些物件沒有價格——只貼著『回憶』兩字。回憶在大洋國是危險品，卻仍有人願意販賣。" },
+        { id: "paperweight", x: 10, y: 4, w: 1, h: 1, label: "珊瑚鎮紙", kind: "examine",
+          text: "玻璃球裡封著一小段粉紅珊瑚。你把它托在掌心，世界似乎遠了一點——遠到電幕的綠光暫時搆不著。它輕得不像罪證，卻重得像希望。" },
+        { id: "prints", x: 11, y: 3, w: 2, h: 1, label: "舊版畫", kind: "examine",
+          text: "聖克萊門特教堂的舊印畫。下面隱約寫著一句歌謠的開頭。紙邊被蟲蛀過，像時間也在審查。鐘聲早已被改正——改正成沉默。" },
+        { id: "window", x: 2, y: 1, w: 2, h: 1, label: "櫥窗", kind: "examine",
+          text: () => {
+            if (!state.flags.junkshopDone)
+              return "櫥窗裡的玻璃還閃著一點溫暖。店主站在貨架旁，微笑著。";
+            return "櫥窗映出街上的雨與無產者區的燈火。樓上似乎有一扇門在等。";
+          } },
+        { id: "stairs", x: 13, y: 7, w: 2, h: 1, label: "後樓梯", kind: "examine",
+          text: () => state.flags.junkshopDone
+            ? "木頭階梯吱呀作響。上面沒有電幕的綠光。"
+            : "樓梯口堆著紙箱。店主還沒提起樓上的事。" },
+      ],
+      drawExtra(ctx, cam) {
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++)
+            if ((x + y) % 3 === 0)
+              px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, "#3a342e");
+        // warm window glow
+        const wx = 2 * TILE - cam.x, wy = 1 * TILE - cam.y;
+        px(wx, wy, 36, 18, "#2a2018");
+        px(wx + 2, wy + 2, 32, 14, "#5a4a30");
+        px(wx + 4, wy + 4, 12, 10, "#8a7040");
+        px(wx + 18, wy + 4, 12, 10, "#7a6038");
+        ctx.fillStyle = "rgba(200,160,80,.15)";
+        ctx.fillRect(wx, wy + 18, 40, 40);
+        // shelves
+        function shelf(x, y) {
+          const sx = x * TILE - cam.x, sy = y * TILE - cam.y;
+          px(sx, sy, 48, 4, C.wood);
+          px(sx + 2, sy - 10, 10, 10, "#6a5a4a");
+          px(sx + 14, sy - 8, 8, 8, "#5a4a3a");
+          px(sx + 24, sy - 12, 12, 12, "#4a3a2a");
+          px(sx + 28, sy - 8, 6, 6, C.paper);
+          px(sx + 38, sy - 6, 6, 6, "#7a3a3a");
+        }
+        shelf(3, 3); shelf(9, 3);
+        // counter
+        const cx = 7 * TILE - cam.x, cy = 7 * TILE - cam.y;
+        px(cx, cy, 32, 14, C.wood);
+        px(cx + 2, cy + 2, 28, 2, C.woodLite);
+        // coral paperweight
+        const px0 = 10 * TILE - cam.x + 4, py0 = 4 * TILE - cam.y + 4;
+        px(px0, py0 + 4, 10, 8, "#8a9aaa");
+        px(px0 + 1, py0 + 2, 8, 10, "rgba(160,180,200,.7)");
+        px(px0 + 3, py0 + 5, 4, 5, "#c86868");
+        px(px0 + 4, py0 + 6, 2, 3, "#e08080");
+        // stair hint
+        for (let i = 0; i < 4; i++)
+          px(13 * TILE - cam.x + i, 7 * TILE - cam.y - i * 3, 24 - i * 2, 3, "#4a3a2a");
+        /* shelf shadow + mote */
+        px(3 * TILE - cam.x, 4 * TILE - cam.y + 10, 40, 3, "rgba(0,0,0,.3)");
+        px(9 * TILE - cam.x + 2, 5 * TILE - cam.y, 2, 2, "#c8c0b0");
+        drawFloorScuffs(cam, W, H, 11);
+        drawDust(cam, W, H, 11);
+        // soft amber lamp
+        px(8 * TILE - cam.x + 6, 2 * TILE - cam.y, 4, 8, C.metal);
+        px(8 * TILE - cam.x + 2, 2 * TILE - cam.y + 8, 12, 6, "#c9a84a");
+        drawLampFlicker(wx, wy + 14, 48, 50, true);
+        drawPaperFlutter(cam, W, H, 11);
+        drawSteamPuffs(wx + 10, wy + 16, 4, 11);
+        /* glassware glints, coral facets, dusty shelf edges */
+        drawObjectGlint(px0 + 2, py0 + 3, 80, 2);
+        drawObjectGlint(px0 + 6, py0 + 6, 110, 5);
+        px(px0 + 2, py0 + 4, 2, 2, "rgba(220,240,255,.35)");
+        px(px0 + 5, py0 + 7, 1, 2, "#e89898");
+        px(3 * TILE - cam.x + 4, 3 * TILE - cam.y - 2, 8, 1, "rgba(200,190,160,.2)");
+        px(9 * TILE - cam.x + 6, 3 * TILE - cam.y - 4, 10, 1, "rgba(200,190,160,.15)");
+        px(4 * TILE - cam.x + 8, 3 * TILE - cam.y - 8, 3, 4, "#8a9aaa");
+        drawObjectGlint(4 * TILE - cam.x + 9, 3 * TILE - cam.y - 7, 95, 8);
+        const lsw = Math.sin(state.tick / 22) > 0.5 ? 1 : 0;
+        px(8 * TILE - cam.x + 6 + lsw, 2 * TILE - cam.y, 4, 8, C.metal);
+      },
+    };
+  }
+
+  function makeSecretRoom() {
+    const W = 14, H = 11;
+    const g = borderWalls(solidGrid(W, H, 0));
+    g[3][3] = 1; g[3][4] = 1; g[4][3] = 1; g[4][4] = 1;
+    g[6][9] = 1;
+    return {
+      id: "secret_room",
+      name: "舊貨鋪 · 樓上房間",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 5 * TILE },
+      exits: [
+        { x: 1, y: 4, w: 1, h: 2, to: "junkshop", spawnX: 13 * TILE, spawnY: 5 * TILE,
+          need: () => !state.flags.brotherhoodDone && !state.flags.arrested,
+          blockedMsg: "樓梯口像被什麼堵住了。房間忽然變得很小。" },
+        { x: 12, y: 4, w: 1, h: 3, to: "obrien_flat", spawnX: 2 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.secretRoomDone && !state.flags.brotherhoodDone && !state.flags.arrested,
+          blockedMsg: "走廊外還有一扇更安靜的門在等——先聽聽房間裡的人。" },
+      ],
+      objects: [
+        { id: "bed", x: 3, y: 3, w: 2, h: 2, label: "雙人床", kind: "examine",
+          text: "舊式雙人床。床單洗得發白。這裡沒有電幕——安靜得幾乎不真實。你聽見自己的呼吸，像違法。牆後偶爾有細響，你告訴自己：只是老鼠，或只是心。" },
+        { id: "engraving", x: 8, y: 1, w: 2, h: 1, label: "聖克萊門特版畫", kind: "picture" },
+        { id: "pw", x: 9, y: 6, w: 1, h: 1, label: "桌上的鎮紙", kind: "examine",
+          text: "珊瑚鎮紙被挪到桌上。玻璃裡的粉紅像一小片被封存的海。" },
+        { id: "nofeel", x: 11, y: 2, w: 1, h: 1, label: "空牆", kind: "examine",
+          text: () => state.flags.pictureFallen
+            ? "版畫掉了。後面露出綠光——這裡從來沒有真正安靜過。"
+            : "牆面空著。沒有綠光，沒有紅點。你第一次覺得房間屬於自己。" },
+        { id: "julia", x: 6, y: 5, w: 1, h: 1, label: "黑髮姑娘", kind: "julia_secret", style: "julia" },
+        { id: "clock", x: 1, y: 7, w: 1, h: 1, label: "停擺的鐘", kind: "examine",
+          text: "鐘停在某個不重要的時刻。時間在這裡似乎也願意慢一點。" },
+      ],
+      drawExtra(ctx, cam) {
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++)
+            if ((x + y) % 2 === 0)
+              px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, "#4a3e32");
+        ctx.fillStyle = "rgba(220,200,160,.08)";
+        ctx.fillRect(0, 0, VW, VH);
+        const bx = 3 * TILE - cam.x, by = 3 * TILE - cam.y;
+        px(bx - 2, by - 2, 40, 40, "#3a2e28");
+        px(bx, by, 36, 36, "#6a5a4a");
+        px(bx + 2, by + 4, 32, 12, "#d8d0c0");
+        px(bx + 2, by + 16, 32, 16, "#8a6a5a");
+        px(bx + 4, by + 6, 12, 8, "#c8c0b0");
+        px(bx + 20, by + 6, 12, 8, "#c8c0b0");
+
+        // engraving / falling picture / revealed telescreen
+        const ex = 8 * TILE - cam.x, ey = 1 * TILE - cam.y;
+        const b = state.betray;
+        let picY = ey;
+        let shakeX = 0;
+        if (b.active && b.phase === "shake") {
+          shakeX = ((state.tick >> 1) % 2 === 0 ? 2 : -2);
+          picY = ey + Math.sin(state.tick / 2);
+        } else if (b.active && (b.phase === "drop" || b.phase === "reveal")) {
+          picY = ey + b.dropY;
+        } else if (state.flags.pictureFallen) {
+          picY = ey + 48;
+        }
+        // hidden telescreen behind (show when fallen or revealing)
+        if (state.flags.pictureFallen || (b.active && (b.phase === "drop" || b.phase === "reveal" || b.phase === "hold"))) {
+          px(ex + 2, ey + 2, 28, 16, "#1a2a1a");
+          px(ex + 4, ey + 4, 24, 12, C.screen);
+          px(ex + 10, ey + 5, 12, 10, "#0a1a0a");
+          const pulse = 0.5 + 0.5 * Math.sin(state.tick / 6);
+          ctx.fillStyle = `rgba(143,206,143,${0.35 + pulse * 0.35})`;
+          ctx.fillRect(ex + 12, ey + 6, 8, 8);
+          px(ex + 14, ey + 8, 4, 4, C.white);
+          px(ex + 15, ey + 9, 2, 2, C.red);
+          ctx.fillStyle = "rgba(0,0,0,.35)";
+          for (let i = 0; i < 5; i++) ctx.fillRect(ex + 4, ey + 4 + i * 2, 24, 1);
+        }
+        if (!state.flags.pictureFallen || (b.active && b.phase !== "hold")) {
+          if (!(b.active && b.phase === "hold")) {
+            px(ex + shakeX, picY | 0, 32, 20, "#2a2218");
+            px(ex + 2 + shakeX, (picY | 0) + 2, 28, 16, "#d0c8b0");
+            px(ex + 8 + shakeX, (picY | 0) + 4, 16, 10, "#8a9aaa");
+            px(ex + 12 + shakeX, (picY | 0) + 6, 8, 8, "#6a7a8a");
+            px(ex + 14 + shakeX, (picY | 0) + 4, 4, 3, "#4a5a6a");
+          }
+        } else {
+          // picture on floor
+          px(ex + 4, ey + 48, 28, 14, "#2a2218");
+          px(ex + 6, ey + 50, 24, 10, "#d0c8b0");
+        }
+
+        const tx = 9 * TILE - cam.x, ty = 6 * TILE - cam.y;
+        px(tx, ty + 6, 20, 10, C.wood);
+        px(tx + 4, ty + 2, 10, 8, "rgba(160,180,200,.65)");
+        px(tx + 6, ty + 4, 5, 5, "#c86868");
+        drawRainWindow(11 * TILE - cam.x, 1 * TILE - cam.y, 28, 16);
+        px(11 * TILE - cam.x + 4, 1 * TILE - cam.y + 4, 20, 10, "rgba(200,180,120,.25)");
+        /* bed shadow + curtain wrinkle */
+        px(3 * TILE - cam.x, 5 * TILE - cam.y + 4, 36, 4, "rgba(0,0,0,.3)");
+        px(11 * TILE - cam.x + 2, 2 * TILE - cam.y, 2, 18, "#3a2a2a");
+        px(11 * TILE - cam.x + 4, 2 * TILE - cam.y + 2, 2, 16, "#4a3a3a");
+        drawFloorScuffs(cam, W, H, 12);
+        drawDust(cam, W, H, 12);
+        /* candle / lamp flicker, clock pendulum, sheet wrinkles, paperweight glint */
+        const cf = 0.1 + 0.08 * Math.sin(state.tick / 5);
+        ctx.fillStyle = `rgba(220,160,60,${cf})`;
+        ctx.fillRect(5 * TILE - cam.x, 4 * TILE - cam.y, 18, 16);
+        px(5 * TILE - cam.x + 6, 4 * TILE - cam.y + 2, 2, 4, "#e8d080");
+        px(5 * TILE - cam.x + 5, 4 * TILE - cam.y, 4, 2, "#ffcc66");
+        const pend = Math.sin(state.tick / 16) > 0 ? 1 : -1;
+        const clkx = 1 * TILE - cam.x + 4, clky = 7 * TILE - cam.y;
+        px(clkx, clky, 10, 14, "#4a3a2a");
+        px(clkx + 2, clky + 2, 6, 6, "#d0c8b0");
+        px(clkx + 4 + pend, clky + 5, 1, 4, "#333");
+        px(clkx + 2, clky + 9, 6, 1, C.metal);
+        px(bx + 8, by + 5, 10, 1, "#b8b0a0");
+        px(bx + 16, by + 8, 8, 1, "#a8a090");
+        drawObjectGlint(tx + 6, ty + 3, 100, 9);
+
+        // thought police entering / present
+        const cops = (b.active && b.cops && b.cops.length) ? b.cops
+          : (state.flags.policeInRoom ? [
+              { x: 3.2 * TILE, y: 5.0 * TILE },
+              { x: 4.5 * TILE, y: 6.2 * TILE },
+              { x: 2.6 * TILE, y: 6.8 * TILE },
+            ] : []);
+        if (cops.length) {
+          if (b.active && b.phase === "enter") {
+            ctx.fillStyle = "rgba(0,0,0,.2)";
+            ctx.fillRect(0, 0, VW, VH);
+          }
+          for (const c of cops) drawPoliceFigure(c.x, c.y, cam);
+        }
+      },
+    };
+  }
+
+  function makeObrienFlat() {
+    const W = 16, H = 12;
+    const g = borderWalls(solidGrid(W, H, 0));
+    for (let x = 3; x <= 6; x++) g[4][x] = 1;
+    g[7][10] = 1; g[7][11] = 1;
+    return {
+      id: "obrien_flat",
+      name: "奧勃良寓所",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 5 * TILE },
+      exits: [
+        { x: 1, y: 4, w: 1, h: 2, to: "apartment_book", spawnX: 7 * TILE, spawnY: 6 * TILE,
+          need: () => state.flags.brotherhoodDone,
+          blockedMsg: "先把話說完。電幕還亮著——或者，該關掉它。" },
+      ],
+      objects: [
+        { id: "servant", x: 3, y: 6, w: 1, h: 1, label: "僕人", kind: "npc", style: "servant",
+          lines: () => [
+            ["僕人", "請稍候。主人很快就來。"],
+            ["僕人", "酒已經備好。請坐。"],
+            ["僕人", "內黨的門廳沒有勝利大廈的氣味。請放鬆——放鬆也是一種禮儀。"],
+            ["僕人", "電幕還亮著。若要說話，請等主人指示。"],
+          ] },
+        { id: "wine", x: 5, y: 4, w: 1, h: 1, label: "葡萄酒", kind: "examine",
+          text: "深色的酒。氣味與勝利牌杜松子酒完全不同——幾乎像另一個時代。杯腳很乾淨，乾淨得不像這個世紀。" },
+        { id: "screen_off", x: 11, y: 2, w: 2, h: 1, label: "電幕", kind: "obrien_screen" },
+        { id: "obrien", x: 9, y: 6, w: 1, h: 1, label: "奧勃良", kind: "obrien_talk", style: "obrien" },
+        { id: "book", x: 12, y: 7, w: 1, h: 1, label: "厚書", kind: "examine",
+          text: "書脊沒有標題。紙很厚。你感覺它比整個紀錄部的檔案都更危險。" },
+        { id: "chair", x: 7, y: 5, w: 1, h: 1, label: "扶手椅", kind: "examine",
+          text: "皮椅保養得很好。內黨的房間聞起來乾燥、整潔，幾乎沒有勝利大廈的酸味。" },
+      ],
+      drawExtra(ctx, cam) {
+        // richer carpet
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++)
+            if ((x + y) % 2 === 0)
+              px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, "#4a3a42");
+            else
+              px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, "#3a2e36");
+        // sofa / table
+        const tx = 3 * TILE - cam.x, ty = 4 * TILE - cam.y;
+        px(tx, ty, 64, 16, "#5a4a3a");
+        px(tx + 4, ty + 2, 20, 10, "#3a2a2a");
+        px(tx + 28, ty + 2, 20, 10, "#3a2a2a");
+        // wine bottle + glasses
+        px(tx + 48, ty - 8, 6, 14, "#4a1a2a");
+        px(tx + 49, ty - 10, 4, 4, "#6a2a3a");
+        px(tx + 56, ty - 2, 5, 8, "#8a9aaa");
+        px(tx + 62, ty - 2, 5, 8, "#8a9aaa");
+        px(tx + 57, ty, 3, 4, "#6a2030");
+        px(tx + 63, ty, 3, 4, "#6a2030");
+        // telescreen (can be off)
+        const sx = 11 * TILE - cam.x, sy = 2 * TILE - cam.y;
+        const off = state.flags.screenOffShock;
+        px(sx - 2, sy - 2, 40, 22, "#222");
+        px(sx, sy, 36, 18, "#1a1a1a");
+        if (off) {
+          px(sx + 4, sy + 4, 28, 10, "#0a0a0a");
+          px(sx + 14, sy + 6, 8, 6, "#111");
+        } else {
+          px(sx + 4, sy + 4, 28, 10, C.screen);
+          px(sx + 12, sy + 5, 10, 8, "#1a1a1a");
+          px(sx + 14, sy + 6, 6, 5, C.white);
+          px(sx + 16, sy + 7, 2, 3, C.red);
+          ctx.fillStyle = "rgba(0,0,0,.3)";
+          for (let i = 0; i < 5; i++) ctx.fillRect(sx + 4, sy + 4 + i * 2, 28, 1);
+        }
+        // bookshelf
+        const bx = 1 * TILE - cam.x + 4, by = 2 * TILE - cam.y;
+        px(bx, by, 20, 36, C.wood);
+        for (let i = 0; i < 5; i++) {
+          px(bx + 2, by + 4 + i * 6, 16, 5, ["#4a2a2a", "#2a3a4a", "#3a4a2a", "#4a3a2a", "#2a2a3a"][i]);
+        }
+        // thick book on stand
+        const kx = 12 * TILE - cam.x, ky = 7 * TILE - cam.y;
+        px(kx, ky + 4, 16, 12, "#2a1a1a");
+        px(kx + 1, ky + 2, 14, 12, "#3a2a1a");
+        px(kx + 3, ky + 5, 10, 1, C.red);
+        drawDust(cam, W, H, 14);
+        // lamp
+        px(8 * TILE - cam.x + 6, 2 * TILE - cam.y, 4, 10, C.metal);
+        px(8 * TILE - cam.x + 2, 2 * TILE - cam.y + 10, 12, 6, "#e8d080");
+      },
+    };
+  }
+
+
+
+  function makeSquare() {
+    const W = 20, H = 14;
+    const g = borderWalls(solidGrid(W, H, 0));
+    // platform base under big screen
+    for (let x = 6; x <= 13; x++) g[3][x] = 1;
+    return {
+      id: "square",
+      name: "勝利廣場",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 8 * TILE },
+      exits: [
+        { x: 1, y: 7, w: 1, h: 3, to: "canteen", spawnX: 13 * TILE, spawnY: 5 * TILE, need: () => true },
+        { x: 18, y: 7, w: 1, h: 3, to: "newspeak", spawnX: 2 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.hateDone,
+          blockedMsg: "人群還沒散。巨型電幕仍在低鳴。" },
+        { x: 9, y: 12, w: 2, h: 1, to: "prole_pub", spawnX: 8 * TILE, spawnY: 2 * TILE,
+          need: () => state.flags.hateDone,
+          blockedMsg: "無產者區的巷口擠滿了人。仇恨還沒結束。" },
+      ],
+      objects: [
+        { id: "hate", x: 8, y: 1, w: 4, h: 2, label: "巨型電幕", kind: "hate" },
+        { id: "obrien_sq", x: 14, y: 5, w: 1, h: 1, label: "奧勃良", kind: "obrien_square", style: "obrien" },
+        { id: "julia_sq", x: 5, y: 9, w: 1, h: 1, label: "黑髮姑娘", kind: "julia_square", style: "julia" },
+        { id: "crowd1", x: 4, y: 6, w: 1, h: 1, label: "人群", kind: "examine",
+          text: "肩膀擠著肩膀。有人已經開始練習口號的節奏。" },
+        { id: "crowd2", x: 11, y: 8, w: 1, h: 1, label: "人群", kind: "examine",
+          text: "孩子被父母舉高，好讓他們看清螢幕裡的敵人。" },
+        { id: "banner", x: 2, y: 2, w: 2, h: 1, label: "橫幅", kind: "examine",
+          text: "『兩分鐘仇恨——每日必修。』布邊被風吹得發硬。" },
+        { id: "banner2", x: 16, y: 2, w: 2, h: 1, label: "標語牌", kind: "examine",
+          text: "『老大哥在看著你。』字比人還高。" },
+        { id: "puddle", x: 9, y: 11, w: 1, h: 1, label: "積水", kind: "examine",
+          text: "廣場石縫積著灰水。倒映出電幕的紅光一閃一閃。" },
+        { id: "alley", x: 10, y: 12, w: 1, h: 1, label: "通往無產者區", kind: "examine",
+          text: () => state.flags.hateDone
+            ? "南面窄巷通向無產者區。酒氣、鋸末與廉價杜松子酒的氣味混在一起。"
+            : "南面有一條窄巷。人群還堵著，暫時走不過去。" },
+      ],
+      drawExtra(ctx, cam) {
+        // outdoor paving
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++) {
+            if (g[y][x] === 1) continue;
+            const v = (x + y) % 3;
+            px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE,
+              v === 0 ? "#3a3e42" : v === 1 ? "#34383c" : "#2e3236");
+          }
+        // sky strip
+        ctx.fillStyle = "#4a5560";
+        ctx.fillRect(0, 0, VW, 28);
+        ctx.fillStyle = "rgba(180,60,60,.12)";
+        ctx.fillRect(0, 0, VW, 40);
+        // giant telescreen
+        const sx = 7 * TILE - cam.x, sy = 1 * TILE - cam.y - 4;
+        px(sx - 6, sy - 4, 100, 52, "#111");
+        px(sx - 2, sy, 92, 42, "#1a1a1a");
+        const hateOn = !state.flags.hateDone;
+        px(sx + 4, sy + 4, 80, 30, hateOn ? "#4a1010" : "#2a3030");
+        if (hateOn) {
+          px(sx + 28, sy + 8, 28, 20, "#1a0808");
+          px(sx + 32, sy + 12, 8, 6, "#2a1010");
+          px(sx + 44, sy + 12, 8, 6, "#2a1010");
+          px(sx + 36, sy + 20, 12, 4, "#3a1818");
+          const pulse = 0.4 + 0.3 * Math.sin(state.tick / 5);
+          ctx.fillStyle = `rgba(255,60,40,${pulse})`;
+          ctx.fillRect(sx + 8, sy + 6, 6, 24);
+          ctx.fillRect(sx + 74, sy + 6, 6, 24);
+        } else {
+          px(sx + 20, sy + 10, 48, 16, "#3a4540");
+          px(sx + 28, sy + 14, 32, 8, "#4a5a48");
+        }
+        // platform
+        px(6 * TILE - cam.x, 3 * TILE - cam.y, 8 * TILE, 10, "#2a2e32");
+        px(6 * TILE - cam.x, 3 * TILE - cam.y + 8, 8 * TILE, 2, "#1a1e22");
+        // banners
+        px(2 * TILE - cam.x, 2 * TILE - cam.y, 28, 10, C.redDark);
+        px(16 * TILE - cam.x, 2 * TILE - cam.y, 28, 10, C.redDark);
+        px(2 * TILE - cam.x + 4, 2 * TILE - cam.y + 3, 20, 2, C.white);
+        px(16 * TILE - cam.x + 4, 2 * TILE - cam.y + 3, 20, 2, C.white);
+        // crowd silhouettes — staggered idle bob
+        function sil(x, y, w, h, i) {
+          const s = Math.sin((state.tick + i * 11) / 18);
+          const bob = s > 0.4 ? -1 : (s < -0.4 ? 1 : 0);
+          const sway = Math.sin((state.tick + i * 7) / 31) > 0.5 ? 1 : 0;
+          px(x * TILE - cam.x + 2 + sway, y * TILE - cam.y + 4 + bob, w, h, "#1a1c20");
+          px(x * TILE - cam.x + 4 + sway, y * TILE - cam.y + 1 + bob, 6, 5, "#222428");
+        }
+        const crowd = [[3,5],[4,7],[5,8],[6,6],[7,8],[8,5],[9,7],[10,9],[11,6],[12,6],[13,8],[14,10],[15,7],[16,9],[8,10],[11,11],[17,8],[2,9]];
+        crowd.forEach(([x,y], i) => sil(x, y, 8 + (i % 3), 10, i));
+        // raised arms during hate — soft height pulse, not hard blink
+        if (!state.flags.hateDone) {
+          [[4,6],[9,6],[13,7],[7,9],[15,8]].forEach(([x,y], i) => {
+            const lift = 2 + ((Math.sin((state.tick + i * 9) / 8) > 0) ? 2 : 0);
+            px(x * TILE - cam.x + 8, y * TILE - cam.y - lift, 2, 4 + lift, "#2a2c30");
+          });
+        }
+        /* puddle gleam under screen */
+        const gleam = 0.15 + 0.1 * Math.sin(state.tick / 9);
+        ctx.fillStyle = `rgba(180,60,60,${gleam})`;
+        ctx.fillRect(9 * TILE - cam.x, 11 * TILE - cam.y + 4, 14, 3);
+        px(3 * TILE - cam.x + 2, 4 * TILE - cam.y, 4, 20, "#3a1010"); /* flag pole */
+        px(3 * TILE - cam.x, 4 * TILE - cam.y, 10, 6, C.redDark);
+        /* rain streaks across square */
+        ctx.fillStyle = "rgba(160,180,200,.35)";
+        for (let i = 0; i < 22; i++) {
+          const rx = ((i * 29 + state.tick * 2) % (W * TILE));
+          const ry = ((i * 17 + state.tick * 3) % (H * TILE));
+          ctx.fillRect(rx - cam.x, ry - cam.y, 1, 4);
+        }
+        if (hateOn) {
+          drawScreenScanlines(sx + 4, sy + 4, 80, 30, 1);
+          /* red flash wash during hate */
+          const flash = 0.04 + 0.05 * Math.max(0, Math.sin(state.tick / 4));
+          ctx.fillStyle = `rgba(200,20,20,${flash})`;
+          ctx.fillRect(0, 0, VW, VH);
+          /* extra distant marchers */
+          for (let i = 0; i < 6; i++) {
+            const mx = (1 + i * 3) * TILE - cam.x + ((state.tick >> 2) % 3);
+            const my = 12 * TILE - cam.y + (i % 2);
+            px(mx, my, 5, 8, "#14161a");
+          }
+        }
+        drawFloorScuffs(cam, W, H, 8);
+        drawDust(cam, W, H, 8);
+        drawPaperFlutter(cam, W, H, 8);
+      },
+    };
+  }
+
+  function makeMeadow() {
+    const W = 18, H = 12;
+    const g = borderWalls(solidGrid(W, H, 0));
+    // a few tree trunks as solids
+    g[3][4] = 1; g[3][13] = 1; g[8][15] = 1;
+    return {
+      id: "meadow",
+      name: "城外草原",
+      w: W, h: H, tiles: g,
+      spawn: { x: 2 * TILE, y: 8 * TILE },
+      exits: [
+        { x: 1, y: 7, w: 1, h: 3, to: "apartment2", spawnX: 11 * TILE, spawnY: 5 * TILE,
+          need: () => true },
+        { x: 16, y: 7, w: 1, h: 3, to: "junkshop", spawnX: 2 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.meadowDone,
+          blockedMsg: "草葉還在顫。有人在樹影裡等你說話。" },
+      ],
+      objects: [
+        { id: "julia_m", x: 9, y: 6, w: 1, h: 1, label: "黑髮姑娘", kind: "julia_meadow", style: "julia" },
+        { id: "tree1", x: 4, y: 3, w: 1, h: 1, label: "遠樹", kind: "examine",
+          text: "樹幹被風削得光禿。再遠一點，城市的煙柱仍看得見。" },
+        { id: "tree2", x: 13, y: 3, w: 1, h: 1, label: "樹蔭", kind: "examine",
+          text: "陰影剛好能遮住肩膀。這裡沒有電幕的綠光。風從草葉間穿過，像一句還沒被刪掉的話。" },
+        { id: "flower", x: 7, y: 8, w: 1, h: 1, label: "野花", kind: "examine",
+          text: "一小簇藍花。她說過：在大洋國，這也算奢侈。" },
+        { id: "path", x: 2, y: 10, w: 2, h: 1, label: "小徑", kind: "examine",
+          text: "泥徑被靴子踩實。再往回走，就是勝利大廈的氣味。" },
+        { id: "sky", x: 8, y: 1, w: 2, h: 1, label: "天空", kind: "examine",
+          text: "雲層薄得不真實。你幾乎忘記廣場上的喧囂。" },
+      ],
+      drawExtra(ctx, cam) {
+        // soft sky
+        ctx.fillStyle = C.sky;
+        ctx.fillRect(0, 0, VW, 36);
+        ctx.fillStyle = C.skyLite;
+        ctx.fillRect(0, 28, VW, 12);
+        // grass field
+        for (let y = 2; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++) {
+            if (g[y][x] === 1) continue;
+            const v = (x * 5 + y * 3) % 3;
+            px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE,
+              v === 0 ? C.grass : v === 1 ? C.grass2 : C.grass3);
+            if ((x + y + state.tick) % 7 === 0)
+              px(x * TILE - cam.x + 6, y * TILE - cam.y + 4, 1, 3, "#6a8a4a");
+          }
+        // trees
+        function tree(tx, ty) {
+          const x = tx * TILE - cam.x, y = ty * TILE - cam.y;
+          px(x + 5, y + 8, 6, 14, "#4a3a28");
+          px(x, y, 16, 14, "#2a4a28");
+          px(x + 2, y - 4, 12, 10, "#3a5a30");
+          px(x + 4, y - 8, 8, 8, "#4a6a38");
+        }
+        tree(4, 3); tree(13, 3); tree(15, 8);
+        // distant city haze
+        ctx.fillStyle = "rgba(60,60,70,.35)";
+        ctx.fillRect(VW - 50, 18, 40, 14);
+        px(VW - 42, 10, 8, 12, "#5a5a68");
+        px(VW - 30, 8, 10, 16, "#4a4a58");
+        // light shafts
+        ctx.fillStyle = "rgba(220,220,180,.06)";
+        ctx.fillRect(40, 0, 30, VH);
+        ctx.fillRect(120, 0, 20, VH);
+        // wildflower
+        px(7 * TILE - cam.x + 6, 8 * TILE - cam.y + 8, 2, 2, "#6a8aca");
+        px(7 * TILE - cam.x + 9, 8 * TILE - cam.y + 6, 2, 2, "#7a9ada");
+        px(10 * TILE - cam.x + 4, 7 * TILE - cam.y + 10, 2, 2, "#ca6a8a");
+        drawFloorScuffs(cam, W, H, 5);
+        /* grass tufts + wind sway + flower clusters + cloud drift shadow */
+        for (let i = 0; i < 12; i++) {
+          const wind = Math.sin((state.tick + i * 9) / 14) > 0 ? 1 : 0;
+          const gx = (2 + i * 1.4) * TILE - cam.x + ((i * 5) % 7) + wind;
+          const gy = (4 + (i % 4)) * TILE - cam.y + 10;
+          px(gx, gy, 1, 3 + (i % 2), "#2a4a20");
+          px(gx + 2, gy + 1, 1, 2, "#3a5a28");
+        }
+        for (let i = 0; i < 5; i++) {
+          const fx = (6 + i) * TILE - cam.x + ((i * 3) % 5);
+          const fy = (7 + (i % 2)) * TILE - cam.y + 6;
+          px(fx, fy, 2, 2, i % 2 ? "#6a8aca" : "#ca6a8a");
+          px(fx + 3, fy + 1, 2, 2, "#7a9ada");
+          px(fx + 1, fy + 2, 1, 2, "#2a4a20");
+        }
+        const cdx = ((state.tick >> 2) % (VW + 60)) - 30;
+        ctx.fillStyle = "rgba(30,40,50,.08)";
+        ctx.fillRect(cdx, 24, 60, VH - 50);
+      },
+    };
+  }
+
+
+  function makeProlePub() {
+    const W = 16, H = 11;
+    const g = borderWalls(solidGrid(W, H, 0));
+    /* bar counter solids */
+    for (let x = 3; x <= 12; x++) g[3][x] = 1;
+    g[7][4] = 1; g[7][5] = 1;
+    g[7][9] = 1; g[7][10] = 1;
+    return {
+      id: "prole_pub",
+      name: "無產者區 · 酒館",
+      w: W, h: H, tiles: g,
+      spawn: { x: 8 * TILE, y: 2 * TILE },
+      exits: [
+        { x: 7, y: 1, w: 2, h: 1, to: "square", spawnX: 10 * TILE, spawnY: 11 * TILE, need: () => true },
+      ],
+      objects: [
+        { id: "oldman", x: 6, y: 5, w: 1, h: 1, label: "老人", kind: "prole_oldman", style: "prole" },
+        { id: "barmaid", x: 11, y: 2, w: 1, h: 1, label: "女侍", kind: "npc", style: "barmaid",
+          lines: [
+            ["女侍", "酒在這兒。問別的，我一概不知。"],
+            ["女侍", "黨的事別在這間屋子裡嚷。無產者只求一杯不那麼嗆的杜松子酒。"],
+          ] },
+        { id: "barrels", x: 13, y: 4, w: 1, h: 2, label: "酒桶", kind: "examine",
+          text: "木桶滲著深色液體。標籤早已被撕掉——也許從來沒有標籤。" },
+        { id: "sticky", x: 4, y: 7, w: 2, h: 1, label: "黏桌", kind: "examine",
+          text: "桌面黏糊糊的，鋸末吸不盡潑翻的酒。有人用指甲在邊上刻過一個字，又被刮掉了。" },
+        { id: "darts", x: 2, y: 5, w: 1, h: 1, label: "鏢靶", kind: "examine",
+          text: "舊鏢靶歪掛在牆上。中心的紅心幾乎被戳穿。沒有人記得比賽規則。" },
+        { id: "sawdust", x: 11, y: 8, w: 1, h: 1, label: "鋸末", kind: "examine",
+          text: "地上鋪著鋸末，用來蓋住嘔吐與泥水。踩上去沙沙響，像某種被壓低的笑聲。" },
+        { id: "bottles", x: 3, y: 2, w: 2, h: 1, label: "酒瓶架", kind: "examine",
+          text: "瓶口積灰。標籤上的年份被墨水塗黑。有人說過：過去越不清楚，酒越好賣。" },
+      ],
+      drawExtra(ctx, cam) {
+        /* warm-dim floor — distinct from Party grey */
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++) {
+            if (g[y][x] === 1) continue;
+            const v = (x * 3 + y * 5) % 3;
+            px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE,
+              v === 0 ? "#3a3228" : v === 1 ? "#342c24" : "#2e2820");
+          }
+        /* amber lamp wash */
+        ctx.fillStyle = "rgba(180,120,40,.10)";
+        ctx.fillRect(0, 0, VW, VH);
+        /* bar counter */
+        const bx = 3 * TILE - cam.x, by = 3 * TILE - cam.y;
+        px(bx, by, 10 * TILE, 12, "#4a3a28");
+        px(bx + 2, by + 2, 10 * TILE - 4, 3, "#6a5238");
+        px(bx + 4, by - 10, 8, 10, "#5a4030"); /* tap */
+        px(bx + 6, by - 6, 3, 6, C.metal);
+        /* bottles on back shelf */
+        for (let i = 0; i < 7; i++) {
+          const col = i % 2 ? "#6a3a3a" : "#3a4a3a";
+          px(bx + 8 + i * 12, by - 14, 5, 12, col);
+          px(bx + 9 + i * 12, by - 16, 3, 3, "#8a7a5a");
+        }
+        /* barrels */
+        function barrel(tx, ty) {
+          const x = tx * TILE - cam.x, y = ty * TILE - cam.y;
+          px(x, y + 4, 14, 18, "#5a4030");
+          px(x + 2, y + 6, 10, 14, "#6a5040");
+          px(x + 1, y + 10, 12, 2, C.metal);
+          px(x + 1, y + 16, 12, 2, C.metal);
+        }
+        barrel(13, 4); barrel(13, 6);
+        /* stools */
+        function stool(tx, ty) {
+          const x = tx * TILE - cam.x + 4, y = ty * TILE - cam.y + 6;
+          px(x, y, 8, 3, "#4a3a28");
+          px(x + 1, y + 3, 2, 6, "#3a2a1a");
+          px(x + 5, y + 3, 2, 6, "#3a2a1a");
+        }
+        stool(5, 4); stool(7, 4); stool(10, 4);
+        /* sticky tables */
+        px(4 * TILE - cam.x, 7 * TILE - cam.y, 28, 12, "#3a3028");
+        px(4 * TILE - cam.x + 2, 7 * TILE - cam.y + 2, 24, 2, "#4a4030");
+        px(9 * TILE - cam.x, 7 * TILE - cam.y, 28, 12, "#3a3028");
+        /* dartboard */
+        const dx = 2 * TILE - cam.x, dy = 5 * TILE - cam.y;
+        px(dx + 2, dy, 12, 12, "#6a3a2a");
+        px(dx + 4, dy + 2, 8, 8, "#8a5a3a");
+        px(dx + 6, dy + 4, 4, 4, "#c04040");
+        px(dx + 7, dy + 5, 2, 2, "#e8e0c0");
+        /* sawdust flecks */
+        for (let i = 0; i < 10; i++) {
+          const sx = (2 + i) * TILE - cam.x + ((i * 7) % 9);
+          const sy = (8 + (i % 2)) * TILE - cam.y + 8;
+          px(sx, sy, 2, 1, "#6a5a40");
+        }
+        /* soft hanging lamp bob */
+        const bob = Math.sin(state.tick / 20) > 0.5 ? 1 : 0;
+        px(8 * TILE - cam.x + 4, 1 * TILE - cam.y + bob, 8, 4, "#c9a84a");
+        ctx.fillStyle = "rgba(200,160,60,.12)";
+        ctx.fillRect(6 * TILE - cam.x, 2 * TILE - cam.y, 5 * TILE, 4 * TILE);
+        drawLampFlicker(5 * TILE - cam.x, 2 * TILE - cam.y, 7 * TILE, 5 * TILE, true);
+        drawSteamPuffs(bx + 40, by - 4, 6, 9);
+        /* bar patrons micro-bob shadows */
+        for (let i = 0; i < 4; i++) {
+          const pb = Math.sin((state.tick + i * 15) / 16) > 0.4 ? -1 : 0;
+          px((4 + i * 2) * TILE - cam.x + 2, 6 * TILE - cam.y + 4 + pb, 6, 10, "rgba(20,16,12,.35)");
+        }
+        drawFloorScuffs(cam, W, H, 14);
+        drawDust(cam, W, H, 14);
+        drawPaperFlutter(cam, W, H, 14);
+        /* beer foam, bar grain, mug reflections */
+        for (let i = 0; i < 4; i++) {
+          const mx = (5 + i * 2) * TILE - cam.x + 4;
+          const my = 4 * TILE - cam.y + 2;
+          px(mx, my, 4, 5, C.gin);
+          px(mx + 1, my - 1, 3, 2, "#f0e8d0");
+          if ((state.tick + i * 13) % 40 < 6) px(mx + 2, my + 1, 1, 1, "#fff");
+        }
+        for (let i = 0; i < 8; i++)
+          px(bx + 6 + i * 14, by + 4, 8, 1, "#5a4830");
+        px(bx + 10, by + 6, 20, 1, "#3a2a1a");
+        drawObjectGlint(bx + 20, by - 12, 85, 6);
+      },
+    };
+  }
+
+  function makeMiniluv() {
+    const W = 14, H = 10;
+    const g = borderWalls(solidGrid(W, H, 0));
+    return {
+      id: "miniluv",
+      name: "友愛部 · 刑訊室",
+      w: W, h: H, tiles: g,
+      spawn: { x: 3 * TILE, y: 5 * TILE },
+      exits: [
+        { x: 12, y: 4, w: 1, h: 2, to: "room101", spawnX: 5 * TILE, spawnY: 5 * TILE,
+          need: () => state.flags.miniluvDone,
+          blockedMsg: "門還鎖著。奧勃良說：課還沒上完。" },
+      ],
+      objects: [
+        { id: "obrien_ml", x: 9, y: 4, w: 1, h: 1, label: "奧勃良", kind: "miniluv_obrien", style: "obrien" },
+        { id: "bench", x: 4, y: 4, w: 3, h: 2, label: "約束長椅", kind: "examine",
+          text: "皮帶與金屬扣。椅子比房 101 的鐵籠樸素，卻同樣讓人無法轉身。" },
+        { id: "dial", x: 11, y: 2, w: 1, h: 1, label: "刻度盤", kind: "examine",
+          text: "盤面上的數字沒有單位。指針停在某一格——像在等一句承認。" },
+        { id: "lever", x: 7, y: 2, w: 1, h: 1, label: "操縱桿", kind: "examine",
+          text: "握柄磨得發亮。有人反覆使用過它。牆是白的，光是白的，沒有窗戶。" },
+        { id: "lamp", x: 6, y: 1, w: 2, h: 1, label: "無影燈", kind: "examine",
+          text: "燈光苛刻得幾乎沒有影子。你開始懷疑：影子也被改正了。" },
+      ],
+      drawExtra(ctx, cam) {
+        /* windowless white/harsh */
+        for (let y = 1; y < H - 1; y++)
+          for (let x = 1; x < W - 1; x++)
+            px(x * TILE - cam.x, y * TILE - cam.y, TILE, TILE, (x + y) % 2 ? "#3a3e44" : "#32363c");
+        const pulse = 0.4 + 0.2 * Math.sin(state.tick / 16);
+        ctx.fillStyle = `rgba(220,220,235,${0.10 + pulse * 0.05})`;
+        ctx.fillRect(3 * TILE - cam.x, 1 * TILE - cam.y, 8 * TILE, 3 * TILE);
+        px(6 * TILE - cam.x + 2, 1 * TILE - cam.y, 28, 5, "#e0e0e8");
+        px(6 * TILE - cam.x + 6, 1 * TILE - cam.y + 5, 20, 2, "#aaa");
+        /* strapped bench */
+        const chx = 4 * TILE - cam.x, chy = 4 * TILE - cam.y + 4;
+        px(chx, chy + 16, 44, 10, "#4a4a52");
+        px(chx + 2, chy + 18, 40, 6, "#5a5a62");
+        px(chx + 4, chy + 2, 36, 16, "#3a3a44");
+        px(chx + 6, chy + 4, 32, 3, "#555");
+        px(chx + 6, chy + 10, 32, 3, "#555");
+        /* straps */
+        px(chx + 2, chy + 12, 10, 3, "#6a3030");
+        px(chx + 32, chy + 12, 10, 3, "#6a3030");
+        px(chx + 14, chy + 20, 16, 3, "#6a3030");
+        /* dial */
+        const dlx = 11 * TILE - cam.x, dly = 2 * TILE - cam.y;
+        px(dlx, dly, 14, 14, "#1a1a1a");
+        px(dlx + 2, dly + 2, 10, 10, "#2a2a2a");
+        px(dlx + 6, dly + 3, 2, 5, C.red);
+        px(dlx + 5, dly + 7, 4, 2, C.metal);
+        /* lever */
+        const lx = 7 * TILE - cam.x + 4, ly = 2 * TILE - cam.y + 2;
+        px(lx, ly + 8, 6, 10, "#3a3a3a");
+        px(lx + 1, ly, 4, 10, C.metal);
+        px(lx, ly - 2, 6, 4, C.redDark);
+        /* wall plate */
+        px(1 * TILE - cam.x + 4, 2 * TILE - cam.y, 22, 12, "#1a1010");
+        ctx.fillStyle = "#c8c8c8";
+        ctx.font = "8px monospace";
+        ctx.fillText("MINILUV", 1 * TILE - cam.x + 6, 2 * TILE - cam.y + 9);
+        /* harsh lamp flicker + dial needle twitch */
+        if (((state.tick * 3) % 47) < 3) {
+          ctx.fillStyle = "rgba(255,255,255,.12)";
+          ctx.fillRect(0, 0, VW, VH);
+        }
+        const needle = Math.sin(state.tick / 11);
+        px(dlx + 6 + (needle > 0.3 ? 1 : 0), dly + 3, 2, 5, C.red);
+        ctx.fillStyle = "rgba(255,200,180,.35)";
+        for (let i = 0; i < 6; i++) {
+          const ax = chx + 8 + ((state.tick + i * 13) % 28);
+          const ay = chy + 4 - ((state.tick + i * 7) % 12);
+          ctx.fillRect(ax, ay, 1, 1);
+        }
+        drawFloorScuffs(cam, W, H, 16);
+        drawDust(cam, W, H, 16);
+        /* wall bolts, drain, O'Brien coat folds when present via NPC, deeper blacks */
+        for (const bx2 of [2, 5, 8, 11]) {
+          px(bx2 * TILE - cam.x + 6, 2 * TILE - cam.y + 10, 2, 2, C.metal);
+          px(bx2 * TILE - cam.x + 6, 8 * TILE - cam.y, 2, 2, C.metal);
+        }
+        px(7 * TILE - cam.x + 4, 8 * TILE - cam.y + 6, 10, 4, "#1a1a1a");
+        px(7 * TILE - cam.x + 6, 8 * TILE - cam.y + 7, 6, 2, "#0a0a0a");
+        ctx.fillStyle = "rgba(0,0,0,.2)";
+        ctx.fillRect(0, VH - 30, VW, 30);
+        px(chx + 8, chy + 8, 20, 1, "#2a2a32");
+        px(chx + 10, chy + 14, 16, 1, "#2a2a32");
+      },
+    };
+  }
+
+  rooms.apartment = makeApartment();
+  rooms.lobby = makeLobby();
+  rooms.corridor = makeCorridor();
+  rooms.ministry = makeMinistry();
+  rooms.canteen = makeCanteen();
+  rooms.square = makeSquare();
+  rooms.newspeak = makeNewspeak();
+  rooms.apartment2 = makeApartment2();
+  rooms.meadow = makeMeadow();
+  rooms.junkshop = makeJunkshop();
+  rooms.secret_room = makeSecretRoom();
+  rooms.obrien_flat = makeObrienFlat();
+  rooms.apartment_book = makeApartmentBook();
+  rooms.gate = makeGate();
+  rooms.room101 = makeRoom101();
+  rooms.chestnut = makeChestnut();
+  rooms.prole_pub = makeProlePub();
+  rooms.miniluv = makeMiniluv();
+
+  function room() { return rooms[state.room]; }
+
+  function updateQuest() {
+    const el = document.getElementById("room-name");
+    if (!el) return;
+    if (state.flags.broken) {
+      el.textContent = t("終點");
+      return;
+    }
+    el.textContent = t(room().name);
+  }
+
+  function collides(nx, ny) {
+    const r = room();
+    const pts = [
+      [nx + 2, ny + 6], [nx + player.w - 2, ny + 6],
+      [nx + 2, ny + player.h - 1], [nx + player.w - 2, ny + player.h - 1],
+    ];
+    for (const [ppx, ppy] of pts) {
+      const tx = Math.floor(ppx / TILE), ty = Math.floor(ppy / TILE);
+      if (ty < 0 || tx < 0 || ty >= r.h || tx >= r.w) return true;
+      if (r.tiles[ty][tx] === 1) return true;
+    }
+    return false;
+  }
+
+  function nearObjects() {
+    const r = room();
+    const px0 = player.x, py0 = player.y;
+    const px1 = player.x + player.w, py1 = player.y + player.h;
+    let best = null, bestD = 1e9;
+    for (const o of r.objects) {
+      if (o.kind === "news" && (r.newsGone?.has(o.newsId) || state.flags.carrying === o.newsId)) continue;
+      const pad = 14;
+      const ox0 = o.x * TILE - pad, oy0 = o.y * TILE - pad;
+      const ox1 = (o.x + o.w) * TILE + pad, oy1 = (o.y + o.h) * TILE + pad;
+      const overlap = !(px1 < ox0 || px0 > ox1 || py1 < oy0 || py0 > oy1);
+      if (!overlap) continue;
+      const ox = (o.x + o.w / 2) * TILE;
+      const oy = (o.y + o.h / 2) * TILE;
+      const d = Math.hypot((px0 + px1) / 2 - ox, (py0 + py1) / 2 - oy);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    return best;
+  }
+
+
+  function talkToObject(o) {
+    if (!o || state.flags.broken) return false;
+    try { Sfx.interact(); } catch (_) {}
+    const f = state.flags;
+    if (o.kind === "npc") {
+      if (o.label) f.met[o.id] = true;
+      const raw = typeof o.lines === "function" ? o.lines() : o.lines;
+      if (!raw) return false;
+      const beats = Array.isArray(raw[0]) ? raw : [raw];
+      showDialogueChain(beats);
+      return true;
+    }
+    if (o.kind === "banter") {
+      if (o.label) f.met[o.id] = true;
+      showDialogueChain(o.beats || []);
+      return true;
+    }
+    if (o.kind === "obrien_talk") {
+      if (o.label) f.met[o.id] = true;
+      if (f.brotherhoodDone) {
+        showDialogueChain([["奧勃良", "路已經指給你了。其餘的，會來找你。"]]);
+        return true;
+      }
+      if (!f.screenOffShock) {
+        showDialogueChain([
+          ["奧勃良", "（他推了推眼鏡，語氣客氣。）"],
+          ["奧勃良", "先讓我們有一點真正的安靜。"],
+          ["", "他的目光落在電幕上。"],
+        ]);
+        return true;
+      }
+      showDialogue("奧勃良", "你們來，是為了加入我們——為了兄弟會。", [
+        { label: "我宣誓。無論要我做什麼。", fn: () => finishBrotherhood("swear") },
+        { label: "我……需要一點時間。", fn: () => finishBrotherhood("hesitate") },
+        { label: "我不信。這太危險了。", fn: () => finishBrotherhood("refuse") },
+      ]);
+      return true;
+    }
+    return false;
+  }
+
+  let exitToastAt = 0;
+  function tryExits() {
+
+    if (state.flags.broken) return;
+    const r = room();
+    const cx = player.x + player.w / 2;
+    const cy = player.y + player.h / 2;
+    for (const e of r.exits) {
+      const ex = e.x * TILE, ey = e.y * TILE;
+      const ew = e.w * TILE, eh = e.h * TILE;
+      if (cx > ex - 4 && cx < ex + ew + 4 && cy > ey - 4 && cy < ey + eh + 4) {
+        if (e.need && !e.need()) {
+          const now = performance.now();
+          if (now - exitToastAt > 1600) {
+            toast(e.blockedMsg || "這條路暫時不通。");
+            exitToastAt = now;
+          }
+          if (e.x <= 1) player.x += 3;
+          else if (e.x >= r.w - 2) player.x -= 3;
+          else if (e.y <= 1) player.y += 3;
+          else player.y -= 3;
+          return;
+        }
+        // mid-beat: chocolate ration announcement leaving canteen
+        if (state.room === "square" && e.to === "newspeak" && state.flags.hateDone && !state.flags.chocolateAnnounced) {
+          state.flags.chocolateAnnounced = true;
+          toast("電幕：本週巧克力配給——上調至二十克。");
+        }
+        if (e.to === "room101" && !state.flags.room101Done && !state.room101Reveal.done) {
+          if (state.flags.arrested && !state.flags.miniluvDone) {
+            beginMiniluvEntrance();
+            return;
+          }
+          beginRoom101Entrance();
+          return;
+        }
+        if (e.to === "miniluv" && !state.flags.miniluvDone && state.flags.arrested) {
+          beginMiniluvEntrance();
+          return;
+        }
+        enterRoom(e.to, e.spawnX, e.spawnY);
+        return;
+      }
+    }
+  }
+
+  function enterRoom(id, sx, sy, opts) {
+    try { Sfx.door(); } catch (_) {}
+    if (state.flags.broken) return;
+    const o = opts || {};
+    state.room = id;
+    if (id !== "apartment") state.flags.leftApartment = true;
+    player.x = sx; player.y = sy;
+    clearMovement();
+    updateQuest();
+    if (!o.silentToast) toast(rooms[id].name);
+    try { Music.setScene(id); } catch (_) {}
+  }
+
+  const dialogueEl = document.getElementById("dialogue");
+  const modalEl = document.getElementById("modal");
+  const modalInner = document.getElementById("modal-inner");
+
+  function toast(msg) {
+    msg = t(msg);
+    const toastEl = document.getElementById("toast");
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    clearTimeout(toast._tm);
+    toast._tm = setTimeout(() => toastEl.classList.remove("show"), 2200);
+  }
+
+  function clearMovement() {
+    keys.clear();
+    touch.ax = touch.ay = 0;
+    touch.active = false;
+    player.moving = false;
+    const knob = document.getElementById("knob");
+    if (knob) knob.style.transform = "translate(0,0)";
+  }
+
+  let typewriterTimer = null;
+  let typewriterSkip = null;
+
+  function cancelTypewriter() {
+    if (typewriterTimer) {
+      clearTimeout(typewriterTimer);
+      typewriterTimer = null;
+    }
+    typewriterSkip = null;
+  }
+
+  function setDockOpen(on) {
+    try { document.body.classList.toggle("dock-open", !!on); } catch (_) {}
+    /* reflow canvas into remaining space above dock + controls */
+    try { requestAnimationFrame(() => resize()); } catch (_) { try { resize(); } catch (__) {} }
+  }
+
+  let dialogueAdvanceFn = null;
+  let dialogueAwaitingAdvance = false;
+
+  function syncInteractLabel() {
+    const btn = document.getElementById("btn-interact");
+    if (!btn) return;
+    btn.textContent = dialogueAwaitingAdvance ? t("繼續") : t("互動");
+  }
+
+  function clearDialogueAdvance() {
+    dialogueAdvanceFn = null;
+    dialogueAwaitingAdvance = false;
+    syncInteractLabel();
+  }
+
+  /** Skip typewriter or advance line / close. Returns true if handled. */
+  function tryAdvanceDialogue() {
+    if (!dialogueEl.classList.contains("active")) return false;
+    if (typewriterSkip) {
+      typewriterSkip();
+      return true;
+    }
+    if (dialogueAwaitingAdvance && dialogueAdvanceFn) {
+      try { Sfx.advance(); } catch (_) {}
+      const fn = dialogueAdvanceFn;
+      clearDialogueAdvance();
+      hideDialogue();
+      try { fn(); } catch (_) {}
+      return true;
+    }
+    return false;
+  }
+
+  function showDialogue(speaker, text, choices, onAdvance) {
+    state.paused = true;
+    clearMovement();
+    cancelTypewriter();
+    clearDialogueAdvance();
+    setDockOpen(true);
+    speaker = t(speaker);
+    text = t(text);
+    document.getElementById("dialogue-speaker").textContent = speaker || "";
+    const textEl = document.getElementById("dialogue-text");
+    textEl.textContent = "";
+    const ch = document.getElementById("dialogue-choices");
+    ch.innerHTML = "";
+
+    const full = text || "";
+    let pendingChoices = choices;
+    let finished = false;
+    const advanceCb = typeof onAdvance === "function" ? onAdvance : null;
+
+    const revealControls = () => {
+      if (finished) return;
+      finished = true;
+      cancelTypewriter();
+      typewriterSkip = null;
+      textEl.textContent = full;
+      ch.innerHTML = "";
+      if (pendingChoices && pendingChoices.length) {
+        clearDialogueAdvance();
+        pendingChoices.forEach(c => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = t(c.label);
+          b.onclick = () => { hideDialogue(); c.fn(); };
+          ch.appendChild(b);
+        });
+      } else {
+        /* no choice UI — advance via 互動→繼續 */
+        dialogueAwaitingAdvance = true;
+        dialogueAdvanceFn = advanceCb || (() => {});
+        syncInteractLabel();
+      }
+    };
+
+    typewriterSkip = revealControls;
+
+    let idx = 0;
+    const tick = () => {
+      if (finished) return;
+      if (idx >= full.length) {
+        revealControls();
+        return;
+      }
+      textEl.textContent += full.charAt(idx);
+      if (idx % 2 === 0) {
+        try { Sfx.type(); } catch (_) {}
+      }
+      idx++;
+      typewriterTimer = setTimeout(tick, 26);
+    };
+
+    dialogueEl.classList.add("active");
+    /* tap box to skip typewriter only (not a button) */
+    const skipHandler = (e) => {
+      if (!typewriterSkip) return;
+      if (e.target && e.target.closest && e.target.closest("button")) return;
+      typewriterSkip();
+    };
+    dialogueEl._typeSkip = skipHandler;
+    dialogueEl.addEventListener("pointerdown", skipHandler);
+
+    if (!full.length) {
+      revealControls();
+    } else {
+      tick();
+    }
+  }
+
+  function showDialogueChain(beats, onDone) {
+    if (!beats || !beats.length) {
+      if (onDone) onDone();
+      return;
+    }
+    let i = 0;
+    const step = () => {
+      if (state.hateCut && state.hateCut.active) { try { Sfx.heckle(false); } catch (_) {} }
+      const [sp, tx] = beats[i];
+      i++;
+      if (i < beats.length) {
+        showDialogue(sp, tx, null, step);
+      } else if (onDone) {
+        showDialogue(sp, tx, null, onDone);
+      } else {
+        showDialogue(sp, tx, null);
+      }
+    };
+    step();
+  }
+
+  function hideDialogue() {
+    cancelTypewriter();
+    clearDialogueAdvance();
+    if (dialogueEl._typeSkip) {
+      try { dialogueEl.removeEventListener("pointerdown", dialogueEl._typeSkip); } catch (_) {}
+      dialogueEl._typeSkip = null;
+    }
+    dialogueEl.classList.remove("active");
+    if (!modalEl.classList.contains("active")) setDockOpen(false);
+    if (!state.flags.broken) state.paused = false;
+    clearMovement();
+    updateQuest();
+  }
+
+  function showModal(html) {
+    state.paused = true;
+    clearMovement();
+    modalInner.innerHTML = html;
+    modalEl.classList.add("active");
+    setDockOpen(true);
+  }
+  function hideModal() {
+    modalEl.classList.remove("active");
+    if (!dialogueEl.classList.contains("active")) setDockOpen(false);
+    if (!state.flags.broken) state.paused = false;
+    clearMovement();
+    updateQuest();
+  }
+
+  function defaultFlags() {
+    return {
+      dimmedScreen: false,
+      lobbySeen: false,
+      leftApartment: false,
+      postersRead: 0,
+      posterOrder: [],
+      newsFixed: 0,
+      carrying: null,
+      hateDone: false,
+      hateChoice: null,
+      newspeakDone: false,
+      diaryDone: false,
+      diaryChoice: null,
+      junkshopDone: false,
+      secretRoomDone: false,
+      brotherhoodDone: false,
+      screenOffShock: false,
+      doublethinkDone: false,
+      room101Done: false,
+      cafeDone: false,
+      broken: false,
+      choiceFlavor: {},
+      met: {},
+      chocolateAnnounced: false,
+      noteSlipped: false,
+      juliaCanteen: false,
+      juliaSquare: false,
+      obrienGlance: false,
+      meadowDone: false,
+      juliaNamed: false,
+      arrested: false,
+      pictureFallen: false,
+      bookReadDone: false,
+      policeInRoom: false,
+      prolePubTalked: false,
+      miniluvDone: false,
+    };
+  }
+
+  function resetDay(showBoot) {
+    try { sessionStorage.removeItem("oceania-broken"); } catch (_) {}
+    state.flags = defaultFlags();
+    state.betray = { active: false, phase: "idle", t: 0, dropY: 0, cops: [] };
+    state.room101Reveal = { active: false, light: 0, duration: 220, sfxAt: 0, done: false };
+    state.hateCut = { active: false, phase: "idle", tx: 0, ty: 0 };
+    state.paused = false;
+    state.room = "apartment";
+    state.wallHeadline = "生產超標 12%";
+    state.interactNear = null;
+    state.tick = 0;
+    state.name = t("溫斯頓");
+    player.x = rooms.apartment.spawn.x;
+    player.y = rooms.apartment.spawn.y;
+    player.facing = "down";
+    player.moving = false;
+    player.anim = 0;
+    if (rooms.ministry && rooms.ministry.newsGone) rooms.ministry.newsGone.clear();
+    if (rooms.gate && rooms.gate.dthink)
+      rooms.gate.dthink = { L: false, R: false, quizDone: false };
+    const lock = document.getElementById("lock-end");
+    if (lock) lock.remove();
+    const touchRoot = document.getElementById("touch");
+    if (touchRoot) touchRoot.classList.remove("locked");
+    document.getElementById("interact-hint").classList.add("hidden");
+    const dlg = document.getElementById("dialogue");
+    if (dlg) dlg.classList.remove("active");
+    const modal = document.getElementById("modal");
+    if (modal) modal.classList.remove("active");
+    clearMovement();
+    updateQuest();
+    try {
+      if (Music.master && Music.ctx && !Music.muted) {
+        const t = Music.ctx.currentTime;
+        Music.master.gain.cancelScheduledValues(t);
+        Music.master.gain.setTargetAtTime(Music.masterVol, t, 0.1);
+      }
+      Music.setScene(showBoot ? "title" : "apartment");
+    } catch (_) {}
+    if (showBoot) {
+      document.getElementById("boot").classList.add("active");
+    }
+  }
+
+  function lockForever() {
+    state.flags.broken = true;
+    state.flags.cafeDone = true;
+    state.paused = true;
+    clearMovement();
+    try {
+      Music.fadeOut(3);
+      Music.playEndingCoda();
+    } catch (_) {}
+    try { sessionStorage.setItem("oceania-broken", "1"); } catch (_) {}
+    const touchRoot = document.getElementById("touch");
+    if (touchRoot) touchRoot.classList.add("locked");
+    document.getElementById("interact-hint").classList.add("hidden");
+    updateQuest();
+
+    let lock = document.getElementById("lock-end");
+    if (lock) lock.remove();
+    lock = document.createElement("div");
+    lock.id = "lock-end";
+    lock.className = "overlay lock-overlay active end-reveal";
+    lock.innerHTML = `
+        <div class="panel boot-panel end-panel">
+          <div class="pixel-eye end-fade-eye" aria-hidden="true"></div>
+          <div class="end-title">${t("你愛老大哥")}</div>
+          <p class="lead end-fade-lead" style="text-align:center;">${t("眼淚流了下來，但沒有關係。")}<br/>${t("一切都歸於平靜。")}</p>
+          <p class="credit end-fade-credit" style="text-align:center;">${t("靈感來自喬治·歐威爾《一九八四》。")}</p>
+          <button type="button" class="btn end-fade-btn" id="btn-replay">${t("再走一日")}</button>
+        </div>`;
+    document.body.appendChild(lock);
+    /* retrigger CSS animations on replay */
+    void lock.offsetWidth;
+    lock.classList.remove("end-reveal");
+    void lock.offsetWidth;
+    lock.classList.add("end-reveal");
+    const btn = document.getElementById("btn-replay");
+    if (btn) btn.onclick = () => {
+      sceneFadeToBlack(() => {
+        resetDay(true);
+        sceneFadeFromBlack();
+      });
+    };
+  }
+
+  function interact() {
+    if (tryAdvanceDialogue()) return;
+    if (state.paused || state.flags.broken || state.room101Reveal.active || state.hateCut.active) return;
+    const o = nearObjects();
+    if (!o) return;
+    const f = state.flags;
+
+    if (o.kind === "telescreen") {
+      showDialogue("電幕", "螢幕沒有開關。你只能把亮度擰暗一點。它仍在看。綠光像潮水，一波波拍打你的臉。", [
+        { label: "調暗亮度", fn: () => {
+          f.dimmedScreen = true;
+          f.choiceFlavor.screen = "dim";
+          toast("電幕變暗了——但沒有關掉。");
+          updateQuest();
+          showDialogue("你", "關不掉。走廊那頭有煮菜的氣味。", null);
+        }},
+        { label: "試著關掉", fn: () => {
+          f.choiceFlavor.screen = "off";
+          showDialogue("電幕", "沒有反應。角落的紅點更亮了一點。", [
+            { label: "只好調暗", fn: () => {
+              f.dimmedScreen = true;
+              toast("電幕變暗了——但沒有關掉。");
+              updateQuest();
+            }},
+          ]);
+        }},
+      ]);
+      return;
+    }
+    if (o.kind === "picture") {
+      if (state.flags.arrested || state.flags.pictureFallen) {
+        showDialogue("電幕", "綠光從牆後露出。它一直在。", null);
+        return;
+      }
+      if (!state.flags.brotherhoodDone) {
+        showDialogue("聖克萊門特版畫", "牆上的版畫：聖克萊門特教堂。角落用鉛筆寫著歌謠的殘句。畫框有點鬆。", null);
+        return;
+      }
+      if (!state.flags.bookReadDone) {
+        showDialogue("聖克萊門特版畫", "畫框微微晃了一下。紙頁的氣味還跟著你——也許該先把書讀完。", null);
+        return;
+      }
+      if (!state.flags.secretRoomDone) {
+        showDialogue("聖克萊門特版畫", "畫框微微晃了一下。也許是風。", null);
+        return;
+      }
+      showDialogue("聖克萊門特版畫", "畫框在顫。灰塵落下來。後面……好像有光？", [
+        { label: "伸手扶住畫框", fn: () => startBetrayal() },
+        { label: "再看一眼", fn: () => startBetrayal() },
+      ]);
+      return;
+    }
+    if (o.kind === "examine") {
+      const txt = typeof o.text === "function" ? o.text() : o.text;
+      showDialogue(o.label, txt, null);
+      return;
+    }
+    if (o.kind === "poster") {
+      if (!f.posterOrder.includes(o.order)) {
+        f.posterOrder.push(o.order);
+        f.postersRead = f.posterOrder.length;
+      }
+      showDialogue(o.front, t("正面：") + t(o.front) + "\n\n" + t("翻面後你讀到：") + t(o.back), null);
+      updateQuest();
+      return;
+    }
+    if (o.kind === "npc" || o.kind === "banter" || o.kind === "auto_flash") {
+      talkToObject(o);
+      return;
+    }
+    if (o.kind === "news") {
+      if (f.carrying != null) {
+        toast("紙還捏在手裡。邊緣發燙。");
+        return;
+      }
+      f.carrying = o.newsId;
+      toast(t("撿起：") + t(o.title));
+      updateQuest();
+      return;
+    }
+    if (o.kind === "hole") {
+      if (f.carrying == null) {
+        showDialogue("記憶洞", "洞口呼著熱風。紙邊會捲起來。", null);
+        return;
+      }
+      const newsObj = room().objects.find(x => x.kind === "news" && x.newsId === f.carrying);
+      const id = f.carrying;
+      f.carrying = null;
+      room().newsGone.add(id);
+      if (newsObj && newsObj.wrong) {
+        f.newsFixed++;
+        const headlines = ["生產超標 12%", "配給上調", "前線大捷", "歷史一向如此"];
+        state.wallHeadline = headlines[Math.min(f.newsFixed, headlines.length - 1)];
+        toast(t("標題改寫為「") + t(state.wallHeadline) + t("」"));
+        if (f.newsFixed >= 3) showDialogue("紀錄部", "三則『錯誤』已被吞掉。牆上的數字在笑。鈴聲從走廊那頭傳來。", null);
+      } else {
+        toast("紅燈一閃：這張是『正確』的。你被記了一筆。");
+        showDialogue("系統", "記錄員注意：勿銷毀正確檔案。", null);
+      }
+      updateQuest();
+      return;
+    }
+    if (o.kind === "hate") {
+      if (f.hateDone) {
+        showDialogue("仇恨螢幕", "今日份額已完成。螢幕改播豐收讚歌。", null);
+        return;
+      }
+      startHate();
+      return;
+    }
+    if (o.kind === "newspeak") {
+      if (f.newspeakDone) {
+        showDialogue("新語終端", "句柄已歸檔。詞彙庫又瘦了一圈。", null);
+        return;
+      }
+      openNewspeak();
+      return;
+    }
+    if (o.kind === "diary") {
+      if (o.locked && o.locked()) {
+        showDialogue("抽屜", "鎖還扣著。也許白天過完再回來。", null);
+        return;
+      }
+      if (f.diaryDone) {
+        showDialogue("抽屜", f.diaryChoice === "burn" ? "紙灰還在縫裡。" : "日記鎖在裡面。電幕音量似乎高了一格。", null);
+        return;
+      }
+      openDiary();
+      return;
+    }
+    if (o.kind === "dthink") {
+      doDoublethink(o.side);
+      return;
+    }
+    if (o.kind === "room101") {
+      if (f.room101Done) {
+        showDialogue("房 101", "裝置已收起。空氣裡有咖啡與雨的味道。", null);
+        return;
+      }
+      openRoom101();
+      return;
+    }
+    if (o.kind === "obrien_screen") {
+      if (f.screenOffShock) {
+        showDialogue("電幕", "它仍然黑著。房間安靜得不像大洋國。", null);
+        return;
+      }
+      showDialogue("電幕", "內黨的電幕……竟然有一個開關。奧勃良的手指停在上面。", [
+        { label: "看他關掉", fn: () => {
+          f.screenOffShock = true;
+          f.choiceFlavor.screenOff = "watched";
+          showDialogue("奧勃良", "現在我們可以說話了。外面聽不見。", null);
+        }},
+        { label: "自己伸手去關", fn: () => {
+          f.screenOffShock = true;
+          f.choiceFlavor.screenOff = "self";
+          showDialogue("電幕", "綠光熄滅。你的手在抖。這在勝利大廈是不可能的。", null);
+        }},
+      ]);
+      return;
+    }
+    if (o.kind === "obrien_talk") {
+      talkToObject(o);
+      return;
+    }
+    if (o.kind === "obrien_square") {
+      state.flags.obrienGlance = true;
+      state.flags.met.obrien_sq = true;
+      if (state.flags.hateDone) {
+        showDialogue("奧勃良", "仇恨已經結束。內黨的人不會在廣場久留。", [
+          { label: "跟上他的目光", fn: () => {
+            state.flags.choiceFlavor.obrienSquare = "follow";
+            showDialogueChain([
+              ["", "眼鏡後的眼睛停了一瞬，像在確認什麼。"],
+              ["奧勃良", "（極輕地點了點頭，隨即轉身沒入人群。）"],
+            ]);
+          }},
+          { label: "假裝沒看見", fn: () => {
+            state.flags.choiceFlavor.obrienSquare = "ignore";
+            showDialogueChain([
+              ["", "你把視線釘回電幕。口號的餘音還在廣場迴盪。"],
+              ["", "可那一瞥已經留在眼底——像一枚不該存在的硬幣。"],
+            ]);
+          }},
+        ]);
+      } else {
+        showDialogue("奧勃良", "內黨的人站在人群邊緣。寬肩，眼鏡微閃。", [
+          { label: "多看一眼", fn: () => {
+            state.flags.choiceFlavor.obrienSquare = "stare";
+            showDialogueChain([
+              ["", "他沒說話。目光只在你臉上停了一瞬。"],
+              ["", "你幾乎以為那一瞥裡有某種默契——又立刻覺得荒唐。"],
+              ["奧勃良", "（他轉向巨型電幕，像什麼也沒發生過。）"],
+            ]);
+          }},
+          { label: "跟著人群喊", fn: () => {
+            state.flags.choiceFlavor.obrienSquare = "yell";
+            showDialogue("你", "口號衝出喉嚨。他仍站在那裡，像石像。", null);
+          }},
+          { label: "低下頭", fn: () => {
+            state.flags.choiceFlavor.obrienSquare = "bow";
+            showDialogue("", "靴跟與石板撞擊。你不敢再抬頭。", null);
+          }},
+        ]);
+      }
+      return;
+    }
+    if (o.kind === "julia_square") {
+      state.flags.juliaSquare = true;
+      state.flags.met.julia_sq = true;
+      if (state.flags.noteSlipped) {
+        showDialogue("黑髮姑娘", "……別再看那張紙。", [
+          { label: "點頭", fn: () => {
+            state.flags.choiceFlavor.juliaSquare = "nod";
+            showDialogue("", "她已經走入人群。紅帶子一閃就消失了。", null);
+          }},
+          { label: "想追問", fn: () => {
+            state.flags.choiceFlavor.juliaSquare = "ask";
+            showDialogue("黑髮姑娘", "廣場有眼睛。城外——也許。", null);
+          }},
+        ]);
+      } else if (state.flags.hateDone) {
+        showDialogue("黑髮姑娘", "……別盯著我看。", [
+          { label: "移開視線", fn: () => {
+            state.flags.choiceFlavor.juliaSquare = "lookaway";
+            showDialogue("", "她的目光很快移開。袖口裡似乎有一角紙。", null);
+          }},
+          { label: "再看一眼", fn: () => {
+            state.flags.choiceFlavor.juliaSquare = "lookagain";
+            showDialogueChain([
+              ["黑髮姑娘", "（低聲）仇恨過後，別急著走。"],
+              ["", "她側過身，消失在舉著拳頭的人群裡。"],
+            ]);
+          }},
+        ]);
+      } else {
+        showDialogue("", "人群裡第一次注意到她——黑髮，腰間紅帶子，神情冷淡。", [
+          { label: "記住這張臉", fn: () => {
+            state.flags.choiceFlavor.juliaSquare = "remember";
+            showDialogue("黑髮姑娘", "看螢幕。別看人。", null);
+          }},
+          { label: "懷疑她是思想警察", fn: () => {
+            state.flags.choiceFlavor.juliaSquare = "suspect";
+            showDialogue("", "腰間的紅帶子刺眼。你告訴自己：危險。", null);
+          }},
+        ]);
+      }
+      return;
+    }
+    if (o.kind === "julia_meadow") {
+      state.flags.met.julia_m = true;
+      if (state.flags.meadowDone) {
+        showDialogueChain([
+          ["朱莉亞", "路已經說好了。舊貨鋪——查林頓先生的樓上。"],
+          ["朱莉亞", "分開走。別一起出現在電幕底下。"],
+        ]);
+        return;
+      }
+      showDialogue("黑髮姑娘", "你來了。這裡聽不見——暫時。", [
+        { label: "你是誰？", fn: () => meadowTalk("who") },
+        { label: "紙條……是你寫的？", fn: () => meadowTalk("note") },
+        { label: "這太危險了。", fn: () => meadowTalk("danger") },
+      ]);
+      return;
+    }
+    if (o.kind === "julia_secret") {
+      if (state.flags.arrested) {
+        showDialogue("朱莉亞", "……", null);
+        return;
+      }
+      if (state.flags.brotherhoodDone) {
+        if (!state.flags.bookReadDone) {
+          showDialogueChain([
+            ["朱莉亞", "書呢？先回家讀。別急著碰那幅畫。"],
+            ["朱莉亞", "讀完再來。我會在這裡等。"],
+          ]);
+          return;
+        }
+        showDialogueChain([
+          ["朱莉亞", "回來了。書讀完了？"],
+          ["你", "讀完了。句子還在發燙。"],
+          ["朱莉亞", "（忽然壓低聲音）等一下——你有沒有聽見牆後面……？"],
+          ["朱莉亞", "版畫在動。別裝看不見。去碰它。"],
+        ]);
+        return;
+      }
+      if (state.flags.secretRoomDone) {
+        showDialogue("朱莉亞", "門在外頭。像普通人拜訪上級那樣去。", null);
+        return;
+      }
+      showDialogue("朱莉亞", "我跟著你上來的。別緊張——這裡聽不見。", [
+        { label: "這裡真的安全嗎？", fn: () => secretJulia("safe") },
+        { label: "草原之後，我一直在想你。", fn: () => secretJulia("miss") },
+        { label: "下一步該怎麼辦？", fn: () => secretJulia("next") },
+      ]);
+      return;
+    }
+    if (o.kind === "prole_oldman") {
+      if (state.flags.prolePubTalked) {
+        showDialogueChain([
+          ["老人", "過去……過去像酒。喝完就忘。忘完又渴。"],
+          ["老人", "自由？那詞兒太貴。買不起。"],
+        ]);
+        return;
+      }
+      showDialogue("老人", "坐下吧，年輕人。這杯不算太嗆——對無產者來說。", [
+        { label: "從前……是不是比較好？", fn: () => proleOldTalk("before") },
+        { label: "你們還記得資本主義嗎？", fn: () => proleOldTalk("capital") },
+        { label: "什麼叫自由？", fn: () => proleOldTalk("freedom") },
+      ]);
+      return;
+    }
+    if (o.kind === "miniluv_obrien") {
+      if (state.flags.miniluvDone) {
+        showDialogueChain([
+          ["奧勃良", "課已經上完。前方是房 101。"],
+        ]);
+        return;
+      }
+      startMiniluvDialogue();
+      return;
+    }
+    if (o.kind === "charrington_talk") {
+      state.flags.met.charrington = true;
+      if (state.flags.junkshopDone) {
+        showDialogue("查林頓先生", state.flags.arrested
+          ? "……"
+          : "樓上還開著。紙鎮也還在。要什麼自己挑。", null);
+        return;
+      }
+      showDialogue("查林頓先生", "進來吧，年輕人。雨下得大，鋪子裡總還有地方躲一躲。", [
+        { label: "只是進來避雨。", fn: () => charringtonTalk("rain") },
+        { label: "聽說樓上有房間？", fn: () => charringtonTalk("room") },
+        { label: "那顆珊瑚鎮紙……", fn: () => charringtonTalk("coral") },
+      ]);
+      return;
+    }
+    if (o.kind === "brotherhood_book") {
+      if (f.bookReadDone) {
+        showDialogue("厚書", "書脊仍無標題。那些句子還在胃裡發燙。遮蔽電幕的房間在等你回去。", null);
+        return;
+      }
+      showDialogue("厚書", "奧勃良塞給你的書。紙很厚。第一章的標題像一把鈍刀。", [
+        { label: "讀「無知即力量」", fn: () => readBrotherhoodBook("ignorance") },
+        { label: "讀戰爭如何維持和平", fn: () => readBrotherhoodBook("war") },
+        { label: "只翻到中間就合上", fn: () => readBrotherhoodBook("skim") },
+      ]);
+      return;
+    }
+    if (o.kind === "cafe") {
+      if (f.cafeDone || f.broken) return;
+      openCafeEnding();
+      return;
+    }
+  }
+
+  function startBetrayal() {
+    if (state.flags.arrested || state.betray.active) return;
+    state.paused = true;
+    clearMovement();
+    state.betray = { active: true, phase: "shake", t: 0, dropY: 0, cops: [] };
+    toast("牆在顫……");
+  }
+
+  function updateBetrayAnim() {
+    const b = state.betray;
+    if (!b.active) return;
+    b.t++;
+    if (b.phase === "shake") {
+      if (b.t > 50) {
+        b.phase = "drop";
+        b.t = 0;
+        b.dropY = 0;
+      }
+    } else if (b.phase === "drop") {
+      b.dropY = Math.min(52, b.dropY + 2.2);
+      if (b.dropY >= 52) {
+        b.phase = "reveal";
+        b.t = 0;
+        state.flags.pictureFallen = true;
+        toast("綠光……");
+      }
+    } else if (b.phase === "reveal") {
+      if (b.t > 36) {
+        b.phase = "enter";
+        b.t = 0;
+        b.cops = [
+          { x: -28, y: 4.2 * TILE, tx: 3.2 * TILE, ty: 5.0 * TILE },
+          { x: -48, y: 5.4 * TILE, tx: 4.5 * TILE, ty: 6.2 * TILE },
+          { x: -36, y: 6.0 * TILE, tx: 2.6 * TILE, ty: 6.8 * TILE },
+        ];
+        try { Music.playArrestSting(); } catch (_) {}
+        toast("叩、叩——鐵靴。");
+      }
+    } else if (b.phase === "enter") {
+      let allIn = true;
+      for (const c of b.cops) {
+        const dx = c.tx - c.x, dy = c.ty - c.y;
+        const d = Math.hypot(dx, dy) || 1;
+        if (d > 1.2) {
+          allIn = false;
+          c.x += (dx / d) * 1.55;
+          c.y += (dy / d) * 1.55;
+        } else {
+          c.x = c.tx; c.y = c.ty;
+        }
+      }
+      if (allIn) {
+        state.flags.policeInRoom = true;
+        b.phase = "wait";
+        b.t = 0;
+        try { toast("……"); } catch (_) {}
+      }
+    } else if (b.phase === "wait") {
+      /* ~2 seconds after they finish entering, then dialogue */
+      if (b.t > 120) {
+        b.active = false;
+        b.phase = "idle";
+        runArrestCutscene();
+      }
+    }
+  }
+
+  function drawPoliceFigure(wx, wy, cam) {
+    const ppx = Math.round(wx - cam.x);
+    const ppy = Math.round(wy - cam.y);
+    ctx.fillStyle = "rgba(0,0,0,.45)";
+    ctx.fillRect(ppx + 1, ppy + 13, 9, 2);
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(ppx, ppy + 5, 10, 9);
+    ctx.fillStyle = "#1a1a1a";
+    ctx.fillRect(ppx + 1, ppy + 5, 8, 2);
+    ctx.fillStyle = "#c4a484";
+    ctx.fillRect(ppx + 2, ppy, 6, 5);
+    ctx.fillStyle = "#050505";
+    ctx.fillRect(ppx + 1, ppy, 8, 2);
+    ctx.fillStyle = "#222";
+    ctx.fillRect(ppx + 2, ppy + 2, 2, 1);
+    ctx.fillRect(ppx + 5, ppy + 2, 2, 1);
+    ctx.fillStyle = C.red;
+    ctx.fillRect(ppx + 7, ppy + 7, 2, 2);
+    ctx.fillStyle = "#3a3a3a";
+    ctx.fillRect(ppx - 1, ppy + 8, 3, 5);
+  }
+
+  function runArrestCutscene() {
+    state.flags.arrested = true;
+    state.flags.policeInRoom = true;
+    showDialogueChain([
+      ["", "思想警察已經站在房間中央。黑制服像三塊移動的夜。"],
+      ["朱莉亞", "他們一直看著……"],
+      ["查林頓先生", "（聲音忽然變硬，不再溫吞。）別動。"],
+      ["", "白髮與和善的皺紋像面具一樣卸下。"],
+      ["思想警察", "思想罪。你們完了。"],
+      ["查林頓先生", "樓上從來沒有真正安靜過。"],
+      ["", "手銬很冷。走廊外的雨聲斷了一下。"],
+    ], () => {
+      beginMiniluvEntrance();
+    });
+  }
+
+  function readBrotherhoodBook(branch) {
+    state.flags.choiceFlavor.book = branch;
+    state.flags.bookReadDone = true;
+    const lines = {
+      ignorance: [
+        ["", "「無知即力量。」句子像釘子敲進額角。"],
+        ["", "你讀到階層如何自我複製，又如何需要戰爭來餵養恐懼。"],
+        ["", "上層要保持上層；中層要取代上層；下層——只求偶爾不被踩碎。"],
+        ["你", "（合上書）原來一切都寫好了——包括我們。"],
+      ],
+      war: [
+        ["", "戰爭不是為了勝利，而是為了維持現狀。紙頁冷靜得近乎殘忍。"],
+        ["", "你讀到內黨如何把真實磨成粉末，再重新澆鑄。"],
+        ["", "前線永遠存在，好讓和平永遠成為口號。"],
+        ["你", "（合上書）回去。那間「沒有電幕」的房間……"],
+      ],
+      skim: [
+        ["", "你只翻到中間。公式、年表、口號的反面——已經夠了。"],
+        ["", "胃裡發燙。電幕的綠光忽然變得刺眼。"],
+        ["", "有些章節像鏡子：你看見自己如何改寫昨天。"],
+        ["你", "（合上書）該回那間房了。"],
+      ],
+    };
+    showDialogueChain((lines[branch] || lines.ignorance).concat([
+      ["", "門縫裡有雨的氣味。遮蔽電幕的房間在城的另一頭等你。"],
+      ["", "書合上後，世界並沒有變輕——只是你知道它為什麼這麼重。"],
+    ]), () => {
+      toast("出口鬆動了。");
+      updateQuest();
+    });
+  }
+
+  function finishBrotherhood(choice) {
+    state.flags.brotherhoodDone = true;
+    state.flags.choiceFlavor.brotherhood = choice;
+    const lines = {
+      swear: [
+        ["奧勃良", "很好。從這一刻起，你已經死了——也已經活了。"],
+        ["奧勃良", "酒。為過去。為將來。"],
+        ["奧勃良", "你必須準備好：說謊、隱瞞、以至於——若需要——傷害你最愛的人。"],
+        ["奧勃良", "離開之後，照常工作。門會在適當的時候打開。"],
+      ],
+      hesitate: [
+        ["奧勃良", "猶豫也無妨。路只有一條，你終會走上來。"],
+        ["奧勃良", "把酒喝了。記住這安靜——它不會長久。"],
+        ["奧勃良", "恐懼證明你還清醒。清醒的人，我們更需要。"],
+        ["奧勃良", "出去吧。其餘的會來找你。"],
+      ],
+      refuse: [
+        ["奧勃良", "拒絕？嘴上這麼說也好。心已經到了。"],
+        ["奧勃良", "你仍會被算在裡面。我們從不浪費一個已經看見真相的人。"],
+        ["奧勃良", "拒絕只是另一種形式的抵達。"],
+        ["奧勃良", "走吧。門在前面。"],
+      ],
+    };
+    const extra = [
+      ["奧勃良", "把書帶走。回家讀。讀完之後——再回那間遮蔽電幕的房間。"],
+      ["奧勃良", "書沒有書名。那是優點。有書名的東西更容易被銷毀。"],
+      ["奧勃良", "照常生活。適當的時候，其餘的會來找你。"],
+      ["", "僕人已經在開門。雨又開始下了。厚書沉甸甸地壓在腋下。"],
+    ];
+    showDialogueChain((lines[choice] || lines.swear).concat(extra));
+  }
+
+
+
+
+  function secretJulia(branch) {
+    state.flags.choiceFlavor.secretJulia = branch;
+    state.flags.secretRoomDone = true;
+    const lines = {
+      safe: [
+        ["朱莉亞", "會被發現。遲早會。但現在——現在還有一點時間。"],
+        ["朱莉亞", "外面什麼都是假的。只有這張床、這點塵，還算真。"],
+        ["朱莉亞", "廣場上那一瞥，你記得吧。戴眼鏡的內黨——去找他。"],
+        ["朱莉亞", "別問我怎麼知道。知道太多的人，活不久。"],
+        ["朱莉亞", "走的時候把領口拉好。像什麼都沒發生過。"],
+      ],
+      miss: [
+        ["朱莉亞", "……我也是。草葉還黏在鞋底呢。"],
+        ["朱莉亞", "可親密在大洋國活不長。我們得加快。"],
+        ["朱莉亞", "內黨那個——奧勃良。像普通人拜訪上級那樣去。"],
+        ["朱莉亞", "他若給你酒，就喝。他若給你書，就帶走。"],
+        ["朱莉亞", "別在電幕底下練習微笑。微笑也會被記錄。"],
+      ],
+      next: [
+        ["朱莉亞", "有個人……內黨的。去找他。"],
+        ["朱莉亞", "廣場仇恨裡他看過你一眼。別裝不記得。"],
+        ["朱莉亞", "拿了書也好，沒拿到也好——路會打開。"],
+        ["朱莉亞", "兄弟會——如果你相信它存在的話。"],
+        ["朱莉亞", "我不信口號。我只信能觸摸的東西：灰塵、皮膚、一扇關得上的門。"],
+      ],
+    };
+    showDialogueChain(lines[branch] || lines.next);
+  }
+
+  function proleOldTalk(branch) {
+    state.flags.choiceFlavor.prolePub = branch;
+    const open = {
+      before: [
+        ["老人", "從前？從前有啤酒。真正的啤酒。不是這種像燒火的杜松子酒。"],
+        ["老人", "那時候……那時候街上還有鐘聲？還是我記錯了？"],
+        ["老人", "黨說從前更苦。我也說不清。苦與甜攪在一起，像這杯酒。"],
+      ],
+      capital: [
+        ["老人", "資本主義？那詞像舊報紙上的蟲洞。"],
+        ["老人", "有人有錢，有人沒錢——這我記得。可細節……細節都被喝掉了。"],
+        ["老人", "老闆、工廠、星期天……星期天是什麼來著？"],
+      ],
+      freedom: [
+        ["老人", "自由？自由就是……能罵老闆？能喝夠？能睡到自然醒？"],
+        ["老人", "不對。或許是能說真話。可真話是什麼？"],
+        ["老人", "我說不清。說得清的人，多半已經不在這間酒館裡。"],
+      ],
+    };
+    showDialogueChain(open[branch] || open.before, () => {
+      showDialogue("老人", "你還想問什麼？", [
+        { label: "那戰爭之前呢？", fn: () => proleOldTalk2("war") },
+        { label: "無產者為什麼不管政治？", fn: () => proleOldTalk2("politics") },
+        { label: "你後悔嗎？", fn: () => proleOldTalk2("regret") },
+      ]);
+    });
+  }
+
+  function proleOldTalk2(branch) {
+    state.flags.choiceFlavor.prolePub2 = branch;
+    const mid = {
+      war: [
+        ["老人", "戰爭之前……總有戰爭之前。像夢的開頭，醒來就沒了。"],
+        ["老人", "我只記得鞋底的洞，同現在差不多。"],
+        ["老人", "黨說我們贏了。贏了什麼？贏了繼續坐在這兒喝酒。"],
+      ],
+      politics: [
+        ["老人", "政治？那是黨的事。我們管肚子。"],
+        ["老人", "他們說無產者是半死不活的——像牲口。牲口不管誰握鞭子。"],
+        ["老人", "可牲口至少還記得草地。我們連草地都說不清。"],
+      ],
+      regret: [
+        ["老人", "後悔？後悔要記得才能後悔。"],
+        ["老人", "我連自己年輕時的臉都想不起來。"],
+        ["老人", "只剩酒味。酒味比記憶老實。"],
+      ],
+    };
+    showDialogueChain(mid[branch] || mid.war, () => {
+      state.flags.prolePubTalked = true;
+      showDialogueChain([
+        ["老人", "所以你問『從前好不好』——我答不上來。"],
+        ["老人", "答不上來，或許就是他們要的。"],
+        ["", "你忽然明白：被掏空的不只是詞彙，還有記得詞彙的人。"],
+        ["", "勝利廣場的電幕還在遠處低鳴。這裡的鋸末氣味卻更像人間。"],
+      ], () => {
+        try { toast("無產者的記憶像酒——喝完就淡。"); } catch (_) {}
+        updateQuest();
+      });
+    });
+  }
+
+  function charringtonTalk(branch) {
+    state.flags.choiceFlavor.charrington = branch;
+    state.flags.junkshopDone = true;
+    const lines = {
+      rain: [
+        ["查林頓先生", "避雨也好。鋪子不趕客。"],
+        ["查林頓先生", "樓上有間空房……不算貴。沒有電幕，安靜得很。"],
+        ["查林頓先生", "從前這條街還有教堂的鐘聲。現在只剩雨打鐵皮。"],
+        ["查林頓先生", "樓梯在後面。小心一點，階梯舊了。"],
+      ],
+      room: [
+        ["查林頓先生", "哦？消息傳得真快。"],
+        ["查林頓先生", "是有一間。沒有電幕——真正的安靜，現在很少見了。"],
+        ["查林頓先生", "珊瑚鎮紙也一併看著玩。顏色像從前的海。"],
+        ["查林頓先生", "聖克萊門特的舊印畫也在——歌謠開頭那句，年輕人多半不記得了。"],
+        ["查林頓先生", "樓梯在後面。"],
+      ],
+      coral: [
+        ["查林頓先生", "珊瑚鎮紙？啊，那是從前的東西。顏色像海水，現在很少見了。"],
+        ["查林頓先生", "喜歡就多看一會兒。樓上還有更靜的地方。"],
+        ["查林頓先生", "玻璃裡那一點粉紅，像黨還沒來得及改正的顏色。"],
+        ["查林頓先生", "鑰匙……嗯，你若要，樓梯在後面。"],
+      ],
+    };
+    showDialogueChain(lines[branch] || lines.rain);
+  }
+
+
+  function juliaLabel() {
+    return state.flags.juliaNamed ? t("朱莉亞") : t("黑髮姑娘");
+  }
+
+  function revealJuliaName() {
+    if (state.flags.juliaNamed) return;
+    state.flags.juliaNamed = true;
+    try {
+      for (const r of Object.values(rooms)) {
+        if (!r || !r.objects) continue;
+        for (const o of r.objects) {
+          if (o.style === "julia" || (o.kind && String(o.kind).startsWith("julia"))) {
+            o.label = "朱莉亞";
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  function meadowTalk(branch) {
+    state.flags.choiceFlavor.meadow1 = branch;
+    const open = {
+      who: [
+        ["黑髮姑娘", "小說部的。寫機器小說的那種。"],
+        ["黑髮姑娘", "我叫朱莉亞。在城裡，名字只是另一張配給證。"],
+        ["朱莉亞", "重要的是——我不是他們派來的。"],
+        ["朱莉亞", "腰間紅帶子是反性同盟的標誌。外面裝得愈虔誠，裡面愈敢反抗。"],
+        ["朱莉亞", "你以為我會舉報你。我也以為你會先舉報我。這就是大洋國的愛情前言。"],
+      ],
+      note: [
+        ["黑髮姑娘", "是。我愛你。寫下來比說出來安全一點——也危險一點。"],
+        ["黑髮姑娘", "我叫朱莉亞。紙上沒寫名字——名字比情書更危險。"],
+        ["朱莉亞", "廣場上不能說。所以才有這片草。"],
+        ["朱莉亞", "字條在袖口裡摺了三次。每一次摺痕，都像一次小型的思想罪。"],
+        ["朱莉亞", "別把紙帶回家。電幕會讀你的臉，比讀字更快。"],
+      ],
+      danger: [
+        ["黑髮姑娘", "當然危險。整個大洋國都危險。"],
+        ["黑髮姑娘", "我叫朱莉亞。連危險裡也該有個真名字。"],
+        ["朱莉亞", "可若連這點真實都不許有，活著和死了有什麼分別？"],
+        ["朱莉亞", "他們要的是孤獨。孤獨的人最好統治。"],
+        ["朱莉亞", "所以我們見面——哪怕只是為了證明還能見面。"],
+      ],
+    };
+    revealJuliaName();
+    showDialogueChain(open[branch] || open.who, () => {
+      showDialogue("朱莉亞", "接下來呢？你想怎麼辦？", [
+        { label: "我們還能再見面嗎？", fn: () => meadowTalk2("meet") },
+        { label: "有沒有更安全的地方？", fn: () => meadowTalk2("safe") },
+        { label: "我只想聽你說話。", fn: () => meadowTalk2("talk") },
+      ]);
+    });
+  }
+
+  function meadowTalk2(branch) {
+    state.flags.choiceFlavor.meadow2 = branch;
+    const mid = {
+      meet: [
+        ["朱莉亞", "能。但不要在部裡。不要在勝利大廈。"],
+        ["朱莉亞", "城裡有一家舊貨鋪。老闆和善，樓上有間空房——沒有電幕。"],
+        ["朱莉亞", "分開走。錯開十分鐘。千萬別並肩出現在同一塊螢幕底下。"],
+        ["朱莉亞", "若有人問，你只是去買舊茶杯。茶杯無罪。"],
+      ],
+      safe: [
+        ["朱莉亞", "安全？沒有真正的安全。只有比較安靜的角落。"],
+        ["朱莉亞", "舊貨鋪樓上。查林頓先生會借你鑰匙。"],
+        ["朱莉亞", "那裡有灰塵、舊歌與一塊粉紅珊瑚。比廣場真實。"],
+        ["朱莉亞", "可別相信『永遠』。永遠是黨的詞。"],
+      ],
+      talk: [
+        ["朱莉亞", "……那就聽一會兒風。"],
+        ["朱莉亞", "可風也會停。我們需要一扇真正的門。"],
+        ["朱莉亞", "舊貨鋪——記住這條路。"],
+        ["朱莉亞", "我還會罵黨。罵得很髒。你聽了別嚇一跳——罵，也是一種呼吸。"],
+      ],
+    };
+    showDialogueChain(mid[branch] || mid.meet, () => {
+      showDialogue("朱莉亞", "廣場上那一瞥，你記得吧。內黨那個戴眼鏡的——", [
+        { label: "記得。奧勃良。", fn: () => meadowClose("name") },
+        { label: "也許他是自己人。", fn: () => meadowClose("ally") },
+        { label: "別提他。先顧我們。", fn: () => meadowClose("us") },
+      ]);
+    });
+  }
+
+  function meadowClose(branch) {
+    state.flags.choiceFlavor.meadow3 = branch;
+    state.flags.meadowDone = true;
+    const end = {
+      name: [
+        ["朱莉亞", "對。像普通人拜訪上級那樣去找他。"],
+        ["朱莉亞", "現在——分開。你先回城，去那家鋪子看看。"],
+        ["朱莉亞", "若你後悔，就別來。我不會怪你——大洋國不給後悔留位子。"],
+      ],
+      ally: [
+        ["朱莉亞", "也許。也許不是。只能試。"],
+        ["朱莉亞", "先把樓上的房間當成我們的。其餘的，以後再說。"],
+        ["朱莉亞", "信任是奢侈品。我們今天已經花掉一份。"],
+      ],
+      us: [
+        ["朱莉亞", "也好。先顧我們。"],
+        ["朱莉亞", "舊貨鋪在等。草葉會忘掉今天——人不會。"],
+        ["朱莉亞", "記得錯開腳步。並肩是給死人用的詞。"],
+      ],
+    };
+    showDialogueChain((end[branch] || end.name).concat([
+      ["", "她轉身走入樹影。草原又只剩風聲。"],
+      ["", "你口袋裡沒有字條——字條已經被風吃掉，或被你吃掉。"],
+    ]));
+  }
+
+  function startHate() {
+    if (state.flags.hateDone) return;
+    /* Cutscene: lock → walk to square mark → heckle cascade → notice O'Brien & Julia → ritual modal */
+    cancelTypewriter();
+    if (dialogueEl._typeSkip) {
+      try { dialogueEl.removeEventListener("pointerdown", dialogueEl._typeSkip); } catch (_) {}
+      dialogueEl._typeSkip = null;
+    }
+    dialogueEl.classList.remove("active");
+    try { hideModal(); } catch (_) {}
+    clearMovement();
+    keys.clear();
+    state.paused = true;
+    try { Music.setHate(true); } catch (_) {}
+    try { Sfx.heckle(true); } catch (_) {}
+    const hc = state.hateCut;
+    hc.active = true;
+    hc.phase = "walk";
+    /* facing giant telescreen / crowd mid-square */
+    hc.tx = 10 * TILE;
+    hc.ty = 6 * TILE;
+    const hint = document.getElementById("interact-hint");
+    if (hint) hint.classList.add("hidden");
+    try { toast("兩分鐘仇恨開始"); } catch (_) {}
+  }
+
+  function updateHateWalk() {
+    const hc = state.hateCut;
+    if (!hc.active || hc.phase !== "walk") return;
+    const dx = hc.tx - player.x;
+    const dy = hc.ty - player.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 1.2) {
+      player.x = hc.tx;
+      player.y = hc.ty;
+      player.facing = "up";
+      player.moving = false;
+      player.anim = 0;
+      hc.phase = "heckle";
+      beginHateHeckles();
+      return;
+    }
+    const step = Math.min(SPEED * 1.05, dist);
+    const nx = player.x + (dx / dist) * step;
+    const ny = player.y + (dy / dist) * step;
+    if (!collides(nx, player.y)) player.x = nx;
+    if (!collides(player.x, ny)) player.y = ny;
+    if (Math.abs(dx) > Math.abs(dy)) player.facing = dx < 0 ? "left" : "right";
+    else player.facing = dy < 0 ? "up" : "down";
+    player.moving = true;
+    player.anim++;
+  }
+
+  function beginHateHeckles() {
+    const shouts = [
+      ["人群", "打倒敵人！打倒叛徒！"],
+      ["孩子", "把他們撕成碎片！"],
+      ["婦女", "間諜！敗類！髒東西！"],
+      ["人群", "效忠！效忠！效忠老大哥！"],
+      ["男人", "金氏的嘴臉——看啊！看啊！"],
+      ["年輕人", "讓他流血！讓他懺悔！"],
+      ["人群", "仇恨！仇恨！仇恨！"],
+      ["電幕", "（嘶聲）……敵人的面孔在白光裡扭曲、融化、又長回來。"],
+      ["婦女", "思想罪！外黨的蛆！"],
+      ["人群", "戰爭即和平！自由即奴役！"],
+      ["孩子", "無知即力量！無知即力量！"],
+      ["男人", "把愛國的唾沫吐到他臉上！"],
+      ["人群", "誰不同仇誰就是敵人！"],
+      ["電幕", "（低吼）……數字正確。前線勝利。敵人永遠存在。"],
+      ["婦女", "為老大哥！為黨！"],
+      ["人群", "老大哥萬歲！萬歲！"],
+    ];
+    showDialogueChain(shouts, () => beginHateNotice());
+  }
+
+  function beginHateNotice() {
+    state.hateCut.phase = "notice";
+    state.flags.obrienGlance = true;
+    state.flags.juliaSquare = true;
+    state.flags.met.obrien_sq = true;
+    state.flags.met.julia_sq = true;
+    state.flags.choiceFlavor.hateCutNotice = "obrien_julia";
+    showDialogueChain([
+      ["", "口號把廣場撕開一條縫。你忽然看見——內黨的人站在人群邊緣。"],
+      ["", "寬肩，眼鏡微閃。目光在你臉上停了一瞬，像在確認什麼。"],
+      ["奧勃良", "（極輕地——也許只是錯覺——點了點頭。）"],
+      ["", "那一瞥比口號更響。像一枚不該存在的硬幣，滾進你胸口。"],
+      ["", "又一眼：黑髮姑娘擠在前排，腰間紅帶子一閃。神情冷淡，卻同樣在喊。"],
+      ["", "她喊得太齊——齊到幾乎像在演戲。你忽然不懂：哪一句是真的。"],
+      ["", "你第一次真正「看見」他們。巨型電幕的紅光打在兩張臉上。"],
+      ["", "仇恨還有半分鐘。你的喉嚨已經沙啞，手心卻是乾的。"],
+    ], () => {
+      state.hateCut.phase = "ritual";
+      startHateRitual();
+    });
+  }
+
+  function startHateRitual() {
+    let left = 20;
+    try { Music.setHate(true); } catch (_) {}
+    showModal(`
+      <h2>${t("兩分鐘仇恨")}</h2>
+      <p>${t("廣場巨型電幕上出現敵人的剪影。人群齊聲喊叫。倒數結束後，你必須選一種姿勢——無論哪一種，儀式都會記你一筆「完成」。")}</p>
+      <div class="hate-enemy"></div>
+      <div class="hate-timer" id="hate-left">${left}</div>
+      <div class="row-btns">
+        <button type="button" class="btn" id="hate-yell">${t("跟著喊口號")}</button>
+        <button type="button" class="btn" id="hate-silent">${t("沉默咬牙")}</button>
+        <button type="button" class="btn" id="hate-glance">${t("瞥向奧勃良")}</button>
+      </div>
+      <p id="hate-yells" style="font-size:.85rem;color:#9aa0a6;min-height:1.4em;"></p>
+    `);
+    let yells = 0, silents = 0;
+    const tick = setInterval(() => {
+      left--;
+      try { if (left % 2 === 0) Sfx.heckle(false); } catch (_) {}
+      const el = document.getElementById("hate-left");
+      if (el) el.textContent = Math.max(0, left);
+      if (left <= 0) {
+        clearInterval(tick);
+        showModal(`
+          <h2>${t("倒數結束")}</h2>
+          <p>${t("你喊了")} ${yells} ${t("次，沉默了")} ${silents} ${t("次。現在回答——看起來像選擇：")}</p>
+          <div class="row-btns">
+            <button type="button" class="btn warn" id="h-true">${t("我真心恨")}</button>
+            <button type="button" class="btn" id="h-fake">${t("我只是跟住做")}</button>
+          </div>
+        `);
+        const finishHate = (choice) => {
+          state.flags.hateDone = true;
+          state.flags.hateChoice = choice;
+          state.flags.choiceFlavor.hate = choice;
+          state.hateCut = { active: false, phase: "idle", tx: 0, ty: 0 };
+          try { Music.setHate(false); Music.setScene(state.room); } catch (_) {}
+          hideModal();
+          const flavor = choice === "true"
+            ? "口號停了。廣場石縫裡的積水還在顫。你告訴自己：這是真心。"
+            : "人群散開一點。眼鏡的反光還留在餘光裡。儀式同樣記你「完成」。";
+          showDialogue("仇恨結束", flavor, null, () => {
+              if (!state.flags.noteSlipped) {
+                state.flags.noteSlipped = true;
+                showDialogueChain([
+                  ["", "人群退潮時，有人從你身旁擦過——廣場邊的黑髮姑娘。"],
+                  ["", "袖口裡掉出一角紙屑。"],
+                  ["紙條", "我愛你。"],
+                  ["", "字跡歪斜。紙邊還帶一點溫熱。別在巨型電幕前讀第二次。"],
+                ]);
+              }
+            });
+        };
+        document.getElementById("h-true").onclick = () => finishHate("true");
+        document.getElementById("h-fake").onclick = () => finishHate("fake");
+      }
+    }, 1000);
+    document.getElementById("hate-yell").onclick = () => {
+      yells++;
+      try { Sfx.heckle(true); } catch (_) {}
+      const phrases = ["打倒敵人！", "效忠！", "勝利！", "仇恨！"].map(t);
+      document.getElementById("hate-yells").textContent = phrases[yells % phrases.length] + (state.lang === "en" ? ` (shouted ${yells})` : `（喊 ${yells}）`);
+    };
+    document.getElementById("hate-silent").onclick = () => {
+      silents++;
+      document.getElementById("hate-yells").textContent = state.lang === "en" ? `Jaws clenched. (Silent ${silents})` : `牙關發緊。（沉默 ${silents}）`;
+    };
+    const glanceBtn = document.getElementById("hate-glance");
+    if (glanceBtn) glanceBtn.onclick = () => {
+      state.flags.obrienGlance = true;
+      state.flags.choiceFlavor.hateGlance = "obrien";
+      document.getElementById("hate-yells").textContent = "眼鏡反光一瞬。他似乎也看見了你。";
+    };
+  }
+
+  function openNewspeak() {
+    const nsPh = t("例如：我對公布的數字有點懷疑");
+    const nsVal = state.lang === "en" ? "I rather doubt the figures published today" : "我今日對公布的數字有點懷疑";
+    showModal(`
+      <h2>${t("新語終端")}</h2>
+      <p>${t("輸入一句日常話。機器會一層層刪詞，直到幾乎說不出原意。")}</p>
+      <input type="text" id="ns-in" maxlength="40" placeholder="${nsPh.replace(/"/g, "&quot;")}" value="${nsVal.replace(/"/g, "&quot;")}" />
+      <div class="chip-row" id="ns-chips"></div>
+      <div class="row-btns">
+        <button type="button" class="btn" id="ns-run">${t("壓縮")}</button>
+        <button type="button" class="btn" id="ns-close">${t("關閉")}</button>
+      </div>
+    `);
+    document.getElementById("ns-close").onclick = hideModal;
+    document.getElementById("ns-run").onclick = () => {
+      const raw = document.getElementById("ns-in").value.trim() || t("我懷疑");
+      const layers = shrinkNewspeak(raw);
+      const box = document.getElementById("ns-chips");
+      box.innerHTML = layers.map((L, i) =>
+        `<span class="chip">L${i}: ${escapeHtml(L)}</span>`
+      ).join("");
+      state.flags.newspeakDone = true;
+      const btn = document.createElement("button");
+      btn.className = "btn";
+      btn.textContent = t("完成 · 離開終端");
+      btn.type = "button";
+      btn.onclick = () => {
+        hideModal();
+        showDialogue("新語", "當句子縮成碎片，有些懷疑再也拼不回去。窗外的雨更密了。", null);
+      };
+      document.querySelector("#modal-inner .row-btns").appendChild(btn);
+    };
+  }
+
+  function shrinkNewspeak(s) {
+    const stop = state.lang === "en"
+      ? ["the", "a", "an", "of", "to", "and", "is", "are", "I", "you", "today", "rather", "a bit"]
+      : ["的", "了", "在", "有", "很", "對", "與", "和", "是", "我", "你", "今日", "有點", "有啲"];
+    let cur = s;
+    const out = [cur];
+    let next = cur;
+    stop.forEach(w => { next = next.split(w).join(""); });
+    next = next.replace(/\s+/g, "");
+    if (next && next !== cur) { out.push(next); cur = next; }
+    if (cur.length > 4) { cur = cur.slice(0, 4); out.push(cur); }
+    if (cur.length > 2) { cur = cur.slice(0, 2); out.push(cur); }
+    out.push(t("（無詞）"));
+    return out;
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+  }
+
+  function openDiary() {
+    showModal(`
+      <h2>${t("抽屜 · 日記")}</h2>
+      <p>${t("只存於本機。寫一行你今天不敢大聲說的話。藏起或燒掉。")}</p>
+      <textarea id="diary-in" maxlength="120" placeholder="……"></textarea>
+      <div class="row-btns">
+        <button type="button" class="btn" id="d-hide">${t("寫完 · 藏起")}</button>
+        <button type="button" class="btn warn" id="d-burn">${t("寫完 · 燒掉")}</button>
+        <button type="button" class="btn" id="d-cancel">${t("取消")}</button>
+      </div>
+    `);
+    document.getElementById("d-cancel").onclick = hideModal;
+    const finish = (choice) => {
+      const text = document.getElementById("diary-in").value.trim();
+      try { localStorage.setItem("oceania-diary", JSON.stringify({ text, choice, t: Date.now() })); } catch (_) {}
+      state.flags.diaryDone = true;
+      state.flags.diaryChoice = choice;
+      state.flags.choiceFlavor.diary = choice;
+      hideModal();
+      const after = state.flags.noteSlipped
+        ? "紙上的字還燙著手心。城外有一片草——她說那裡暫時聽不見。思想寫成字，就像把心臟放到桌上。"
+        : "路仍通向同一扇門。窗外的雨停了一會兒。你忽然明白：敢寫，已經是一種小型的反叛。";
+      if (choice === "burn") showDialogue("火焰", t("紙捲成黑蝴蝶。牆上的標語看起來更乾淨了。灰燼落進抽屜縫，像尚未被改正的歷史。") + t(after), null);
+      else showDialogue("抽屜", t("鎖扣上。電幕的聲音好像高了一格。你把反叛藏進木頭裡，木頭卻不會替你保密太久。") + t(after), null);
+    };
+    document.getElementById("d-hide").onclick = () => finish("hide");
+    document.getElementById("d-burn").onclick = () => finish("burn");
+  }
+
+  function doDoublethink(side) {
+    const g = rooms.gate.dthink;
+    if (side === "L") {
+      g.L = true;
+      showDialogue("解釋甲", "「戰爭即和平」——戰爭動員全民，使內部平靜。因此戰爭就是和平。", null);
+    } else {
+      g.R = true;
+      showDialogue("解釋乙", "「戰爭即和平」——和平是黨給予的詞。凡黨所稱的和平，皆可稱為戰爭之成果。", null);
+    }
+    if (g.L && g.R && !g.quizDone) {
+      setTimeout(() => {
+        showDialogue("門廳", "兩扇都亮了。最後一題：下列哪組可以『同時成立』？", [
+          { label: "配給減少，且配給增加（相對去年修正後的數字）", fn: () => {
+            g.quizDone = true;
+            state.flags.doublethinkDone = true;
+            state.flags.choiceFlavor.dthink = "accept";
+            showDialogue("門", "你同時點了頭。門軸鬆動。前方是房 101。", null);
+          }},
+          { label: "二加二等於五——若黨如此需要", fn: () => {
+            g.quizDone = true;
+            state.flags.doublethinkDone = true;
+            state.flags.choiceFlavor.dthink = "five";
+            showDialogue("門", "你同時相信了。門軸同樣鬆動。前方是房 101。", null);
+          }},
+          { label: "二加二等於四，且只等於四", fn: () => {
+            state.flags.choiceFlavor.dthink = "resist_temp";
+            showDialogue("門廳", "太單一。再想想『同時』——不過門遲早會開。去把兩扇門再確認一次。", null);
+            g.L = false; g.R = false;
+          }},
+        ]);
+      }, 400);
+    }
+    updateQuest();
+  }
+
+  function beginMiniluvEntrance() {
+    cancelTypewriter();
+    if (dialogueEl._typeSkip) {
+      try { dialogueEl.removeEventListener("pointerdown", dialogueEl._typeSkip); } catch (_) {}
+      dialogueEl._typeSkip = null;
+    }
+    dialogueEl.classList.remove("active");
+    enterRoom("miniluv", 3 * TILE, 5 * TILE, { silentToast: true });
+    try { Music.setScene("miniluv"); } catch (_) {}
+    state.paused = true;
+    clearMovement();
+    const hint = document.getElementById("interact-hint");
+    if (hint) hint.classList.add("hidden");
+    try { toast("友愛部 · 刑訊室"); } catch (_) {}
+    /* slight delay so room draws once before dialogue */
+    setTimeout(() => {
+      if (state.flags.miniluvDone) {
+        state.paused = false;
+        return;
+      }
+      startMiniluvDialogue();
+    }, 280);
+  }
+
+  function startMiniluvDialogue() {
+    showDialogueChain([
+      ["", "燈光白得沒有溫度。沒有窗戶。皮帶扣進腕骨。"],
+      ["", "這裡不是房 101——但已經足夠讓人忘記自己還有名字。"],
+      ["奧勃良", "別把這裡當成懲罰。"],
+      ["奧勃良", "我們帶你來這裡，是為了治好你。"],
+      ["奧勃良", "疼痛是教育。它比語言更快抵達正確的地方。"],
+      ["你", "……茱莉亞……"],
+      ["奧勃良", "她已經在另一間房間。她也會被治好。分開，比較有效。"],
+      ["奧勃良", "現在——看我。"],
+      ["奧勃良", "二加二等於幾？"],
+    ], () => {
+      showDialogue("奧勃良", "說。二加二等於幾？", [
+        { label: "四。永遠是四。", fn: () => miniluvTwoPlusTwo("four") },
+        { label: "……五。", fn: () => miniluvTwoPlusTwo("five") },
+        { label: "（慘叫）我不——我不知道！", fn: () => miniluvTwoPlusTwo("scream") },
+      ]);
+    });
+  }
+
+  function miniluvTwoPlusTwo(flavor) {
+    state.flags.choiceFlavor.miniluv = flavor;
+    const open = {
+      four: [
+        ["你", "四。"],
+        ["奧勃良", "錯。暫時錯。我們有的是時間。"],
+        ["", "電流——或者某種更安靜的東西——穿過牙關。眼睛裡全是白。"],
+        ["奧勃良", "再想一次。黨不要求你假裝。黨要求你真心相信。"],
+      ],
+      five: [
+        ["你", "五。"],
+        ["奧勃良", "很好。嘴巴先到了。心會跟上。"],
+        ["", "你聽見自己說「五」，像在背誦別人的喉嚨。"],
+        ["奧勃良", "記住這種感覺。它比真實更有用。"],
+      ],
+      scream: [
+        ["你", "我不知道——我不知道！"],
+        ["奧勃良", "不知道，是誠實的開始。"],
+        ["", "慘叫聲撞在白牆上，沒有回音——牆把聲音也改正了。"],
+        ["奧勃良", "等你真正知道的時候，答案會只有一個。"],
+      ],
+    };
+    showDialogueChain((open[flavor] || open.four).concat([
+      ["奧勃良", "二加二等於五。你會看見它——像看見太陽。"],
+      ["奧勃良", "權力不是手段。權力就是目的。"],
+      ["奧勃良", "茱莉亞已經碎過一次。你也會。碎了，才能裝進正確的形狀。"],
+      ["奧勃良", "不過——這裡還不是終點。"],
+      ["奧勃良", "最後的地方叫房 101。那裡有你最害怕的東西。"],
+      ["", "門在對面打開。白光更白了一點。"],
+    ]), () => {
+      state.flags.miniluvDone = true;
+      beginRoom101Entrance();
+    });
+  }
+
+  function beginRoom101Entrance() {
+    /* close any open dialogue without unpausing mid-reveal */
+    cancelTypewriter();
+    if (dialogueEl._typeSkip) {
+      try { dialogueEl.removeEventListener("pointerdown", dialogueEl._typeSkip); } catch (_) {}
+      dialogueEl._typeSkip = null;
+    }
+    dialogueEl.classList.remove("active");
+    enterRoom("room101", 5 * TILE, 5 * TILE, { silentToast: true });
+    try { Music.setScene("room101"); } catch (_) {}
+    const rev = state.room101Reveal;
+    rev.active = true;
+    rev.light = 0;
+    rev.duration = 220; /* ~3.6s at 60fps */
+    rev.sfxAt = 0;
+    rev.done = false;
+    state.paused = true;
+    clearMovement();
+    const hint = document.getElementById("interact-hint");
+    if (hint) hint.classList.add("hidden");
+    try { toast("房 101"); } catch (_) {}
+  }
+
+  function updateRoom101Reveal() {
+    const rev = state.room101Reveal;
+    if (!rev.active) return;
+    rev.light = Math.min(1, rev.light + 1 / rev.duration);
+    /* quiet ominous chip ticks during fade */
+    if (rev.light < 0.92 && state.tick - rev.sfxAt >= 18) {
+      rev.sfxAt = state.tick;
+      try {
+        if (Music.sfxReady && Music.sfxReady()) {
+          const f = 90 + Math.floor(rev.light * 140) + ((state.tick * 7) % 30);
+          Music.sfxBlip(f, 0.05, 0.035 + rev.light * 0.02);
+          if ((state.tick % 36) < 2) Music.hat(0.04, 0.02);
+        }
+      } catch (_) {}
+    }
+    if (rev.light >= 1) {
+      rev.active = false;
+      rev.done = true;
+      rev.light = 1;
+      /* keep paused until dialogue takes over */
+      startRoom101DialogueAfterReveal();
+    }
+  }
+
+  function drawRoom101Reveal() {
+    const rev = state.room101Reveal;
+    if (!rev.active && !(state.room === "room101" && rev.light < 1 && !rev.done)) return;
+    if (state.room !== "room101") return;
+    const a = Math.max(0, Math.min(1, 1 - rev.light));
+    if (a <= 0.001) return;
+    /* full black veil → rising vignette light */
+    ctx.fillStyle = `rgba(0,0,0,${a})`;
+    ctx.fillRect(0, 0, VW, VH);
+    if (rev.light > 0.05 && rev.light < 0.98) {
+      const cx = VW * 0.62, cy = VH * 0.45;
+      const R = 20 + rev.light * 160;
+      const g = ctx.createRadialGradient(cx, cy, 4, cx, cy, R);
+      g.addColorStop(0, `rgba(180,40,40,${0.12 * rev.light})`);
+      g.addColorStop(0.45, `rgba(0,0,0,0)`);
+      g.addColorStop(1, `rgba(0,0,0,${a * 0.35})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, VW, VH);
+    }
+  }
+
+  function startRoom101DialogueAfterReveal() {
+    if (state.flags.room101Done) {
+      state.paused = false;
+      return;
+    }
+    openRoom101();
+  }
+
+  function openRoom101() {
+    if (state.flags.room101Done) {
+      showDialogue("房 101", "裝置已收起。空氣裡有咖啡與雨的味道。", null);
+      return;
+    }
+    showDialogueChain([
+      ["", "皮帶勒進腕骨。你被鎖在鐵椅上，動彈不得。"],
+      ["", "燈光很白。空氣裡有鐵與潮濕的氣味。"],
+      ["奧勃良", "你知道自己在哪裏。"],
+      ["你", "……房 101。"],
+      ["奧勃良", "很好。你還能說話。"],
+      ["奧勃良", "說話很好。說話代表你還能被改寫。"],
+    ], () => {
+      try { Music.playRatsRise(); } catch (_) {}
+      showDialogueChain([
+        ["", "他站在你面前。鐵籠的輪廓貼近面門。"],
+        ["", "裡面有細小的爪子聲——尖銳、匆忙，像無數細齒在鐵絲上試探。"],
+        ["奧勃良", "房 101 裡是世上最可怕的東西。那東西因人而異。"],
+        ["奧勃良", "對你而言——是老鼠。"],
+        ["", "你記得自己曾說過怕牠們。原來那句話也被保存了。"],
+        ["", "籠門的插銷輕輕一響。溫熱的氣息噴在臉上。"],
+        ["奧勃良", "它們餓了。你還能撐多久？"],
+        ["奧勃良", "權力不是為了守住什麼。權力就是目的本身。"],
+        ["奧勃良", "別看籠子。看我。說出你真正想說的話。"],
+      ], () => {
+        showDialogue("奧勃良", "現在——選一句話。說出來。", [
+          { label: "對她做吧！不要對我——懲罰她！", fn: () => finishRoom101("her") },
+          { label: "我受不了……把籠子轉向別人！轉向她！", fn: () => finishRoom101("cage") },
+          { label: "不要碰我——她才該承受這個！", fn: () => finishRoom101("notme") },
+        ]);
+      });
+    });
+  }
+
+  function finishRoom101(flavor) {
+    state.flags.room101Done = true;
+    state.flags.choiceFlavor.room101 = flavor;
+    const lead = {
+      her: "「對她做吧！」聲音撕開喉嚨，像不是你自己在喊。",
+      cage: "「轉向她！」鐵籠晃了一下——你的手指仍在發抖。",
+      notme: "「不要碰我——她！」字句砸在白光裡，回聲比你更響。",
+    };
+    showDialogueChain([
+      ["你", lead[flavor] || lead.her],
+      ["", "籠子移開一瞬。空氣重新進入肺葉。"],
+      ["奧勃良", "很好。你明白了。"],
+      ["奧勃良", "愛可以被打碎。碎了之後，才能裝進正確的形狀。"],
+      ["", "黑髮姑娘的臉在記憶裡裂開——不是恨，是更大的空洞。"],
+      ["", "你背叛了她。這才是最後的課。"],
+      ["", "你忽然發現：恐懼比忠誠更快抵達終點。"],
+      ["", "燈光淡去。雨聲與咖啡的氣味慢慢滲進來。"],
+    ], () => {
+      enterRoom("chestnut", 3 * TILE, 6 * TILE);
+      toast("栗樹咖啡館");
+      showDialogue("咖啡館", "雨打著玻璃。棋盤擺好了。角落有一張空桌——上面放著杜松子酒與一份舊報。你的手仍在抖，像剛把什麼人推了出去。旁邊幾個男人的眼睛是空的——空得像已經愛過、也已經輸過。", null);
+    });
+  }
+
+  function openCafeEnding() {
+    showDialogue("角落桌", "你坐下。窗外的雨聲像電幕。有人在問——或者是你在問自己：", [
+      { label: "我恨老大哥", fn: () => finishCafe("hate") },
+      { label: "我愛老大哥", fn: () => finishCafe("love") },
+      { label: "我什麼都不想", fn: () => finishCafe("empty") },
+    ]);
+  }
+
+  function finishCafe(choice) {
+    state.flags.choiceFlavor.final = choice;
+    state.flags.cafeDone = true;
+    const mid = choice === "hate"
+      ? "你以為恨意還在。淚水卻先一步抵達。棋子沒有移動。"
+      : choice === "love"
+      ? "你聽見自己說出那句話。棋子沒有移動。"
+      : "空洞裡長出一句現成的話。棋子沒有移動。";
+    showDialogue("終局", mid, null, () => {
+        showModal(`
+          <h2 class="end-modal-title" style="text-align:center;letter-spacing:.15em;">${t("你愛老大哥")}</h2>
+          <p style="text-align:center;">${t("一切爭鬥都結束了。")}<br/>${t("你贏了自己。——這一局，早已寫好。")}</p>
+          <p style="font-size:.85rem;color:#9aa0a6;text-align:center;">${t("公民：")}${escapeHtml(state.name)}　${t("口味標記僅供回味，結局唯一。")}</p>
+          <p class="credit" style="text-align:center;">${t("靈感來自喬治·歐威爾《一九八四》。")}</p>
+          <div class="row-btns" style="justify-content:center;">
+            <button type="button" class="btn dead" id="end-lock">……</button>
+          </div>
+        `);
+        try { Music.playEndingCoda(); } catch (_) {}
+        document.getElementById("end-lock").onclick = () => {
+          hideModal();
+          lockForever();
+        };
+        setTimeout(() => {
+          if (!state.flags.broken) {
+            hideModal();
+            lockForever();
+          }
+        }, 4000);
+      });
+  }
+
+  function drawPlayer(cam) {
+    const ppx = Math.round(player.x - cam.x);
+    const ppy = Math.round(player.y - cam.y);
+    const fr = player.moving ? (Math.floor(player.anim / 5) % 4) : 0;
+    const legOff = [0, 1, 0, -1][fr];
+    const idleBob = (!player.moving && Math.sin(state.tick / 26) > 0.55) ? 1 : 0;
+    const bob = player.moving ? (fr === 1 || fr === 3 ? 1 : 0) : idleBob;
+    const armSwing = player.moving ? ([0, 1, 0, -1][fr]) : 0;
+
+    ctx.fillStyle = "rgba(0,0,0,.45)";
+    ctx.fillRect(ppx + 1, ppy + player.h - 1, player.w - 2, 2);
+
+    const facing = player.facing;
+    ctx.fillStyle = C.pants;
+    if (facing === "left" || facing === "right") {
+      ctx.fillRect(ppx + 3, ppy + 10 + bob, 2, 4);
+      ctx.fillRect(ppx + 6, ppy + 10 + bob + legOff, 2, 4);
+      ctx.fillStyle = "#1e2838";
+      ctx.fillRect(ppx + 3, ppy + 13 + bob, 2, 1);
+      ctx.fillRect(ppx + 6, ppy + 13 + bob + legOff, 2, 1);
+    } else {
+      ctx.fillRect(ppx + 2, ppy + 10 + bob, 3, 4);
+      ctx.fillRect(ppx + 5, ppy + 10 + bob - legOff, 3, 4);
+      ctx.fillStyle = "#1e2838";
+      ctx.fillRect(ppx + 2, ppy + 13 + bob, 3, 1);
+      ctx.fillRect(ppx + 5, ppy + 13 + bob - legOff, 3, 1);
+    }
+    ctx.fillStyle = C.shirt;
+    ctx.fillRect(ppx + 1, ppy + 5 + bob, 8, 6);
+    ctx.fillStyle = "#4a5a7a";
+    ctx.fillRect(ppx + 2, ppy + 5 + bob, 6, 1);
+    ctx.fillStyle = "#2a3548";
+    ctx.fillRect(ppx + 2, ppy + 5 + bob, 2, 5);
+    ctx.fillRect(ppx + 6, ppy + 5 + bob, 2, 5);
+    ctx.fillStyle = "#2a2a2a";
+    ctx.fillRect(ppx + 1, ppy + 10 + bob, 8, 1);
+    ctx.fillStyle = "#5a4050";
+    ctx.fillRect(ppx + 3, ppy + 12 + bob, 1, 2);
+    ctx.fillStyle = C.skin;
+    if (facing === "left") ctx.fillRect(ppx + 0, ppy + 6 + bob - legOff - armSwing, 2, 4);
+    else if (facing === "right") ctx.fillRect(ppx + 8, ppy + 6 + bob + legOff + armSwing, 2, 4);
+    else {
+      ctx.fillRect(ppx + 0, ppy + 6 + bob + (armSwing > 0 ? 1 : 0), 2, 3);
+      ctx.fillRect(ppx + 8, ppy + 6 + bob - (armSwing > 0 ? 1 : 0), 2, 3);
+    }
+    if (facing === "up") {
+      ctx.fillStyle = C.hair;
+      ctx.fillRect(ppx + 2, ppy + bob, 6, 5);
+      ctx.fillStyle = "#1a1a1a";
+      ctx.fillRect(ppx + 2, ppy + 4 + bob, 6, 1);
+      ctx.fillStyle = "#3a3a3a";
+      ctx.fillRect(ppx + 3, ppy + bob, 4, 1);
+    } else {
+      ctx.fillStyle = C.skin;
+      ctx.fillRect(ppx + 2, ppy + bob, 6, 5);
+      ctx.fillStyle = "#b09070";
+      ctx.fillRect(ppx + 3, ppy + 3 + bob, 4, 1);
+      ctx.fillStyle = C.hair;
+      ctx.fillRect(ppx + 2, ppy + bob, 6, 2);
+      ctx.fillStyle = "#3a3a3a";
+      ctx.fillRect(ppx + 3, ppy + bob, 4, 1);
+      ctx.fillStyle = C.black;
+      if (facing === "down") {
+        ctx.fillRect(ppx + 3, ppy + 2 + bob, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 2 + bob, 1, 1);
+        ctx.fillStyle = "#8a6048";
+        ctx.fillRect(ppx + 4, ppy + 4 + bob, 2, 1);
+      } else if (facing === "left") ctx.fillRect(ppx + 3, ppy + 2 + bob, 1, 1);
+      else ctx.fillRect(ppx + 6, ppy + 2 + bob, 1, 1);
+    }
+    ctx.fillStyle = C.red;
+    ctx.fillRect(ppx + 7, ppy + 6 + bob, 2, 2);
+    ctx.fillStyle = "#e57373";
+    ctx.fillRect(ppx + 7, ppy + 6 + bob, 1, 1);
+
+    if (state.flags.carrying != null) {
+      ctx.fillStyle = C.paper;
+      ctx.fillRect(ppx + 9, ppy + 5 + bob, 5, 6);
+      ctx.fillStyle = "#c8c0a8";
+      ctx.fillRect(ppx + 10, ppy + 6 + bob, 3, 4);
+      ctx.fillStyle = C.red;
+      ctx.fillRect(ppx + 10, ppy + 6 + bob, 3, 1);
+    }
+  }
+
+  function drawTiles(r, cam) {
+    for (let y = 0; y < r.h; y++) {
+      for (let x = 0; x < r.w; x++) {
+        const ppx = x * TILE - cam.x;
+        const ppy = y * TILE - cam.y;
+        if (ppx < -TILE || ppy < -TILE || ppx > VW || ppy > VH) continue;
+        const t = r.tiles[y][x];
+        if (t === 1) {
+          ctx.fillStyle = C.wall;
+          ctx.fillRect(ppx, ppy, TILE, TILE);
+          ctx.fillStyle = C.wallTop;
+          ctx.fillRect(ppx, ppy, TILE, 3);
+          ctx.fillStyle = "#15181c";
+          ctx.fillRect(ppx + TILE - 2, ppy, 2, TILE);
+          if ((x + y) % 2 === 0) {
+            ctx.fillStyle = "#23282e";
+            ctx.fillRect(ppx + 2, ppy + 6, 6, 1);
+          }
+        } else {
+          const v = (x * 3 + y * 7) % 3;
+          ctx.fillStyle = v === 0 ? C.floor : v === 1 ? C.floor2 : C.floor3;
+          ctx.fillRect(ppx, ppy, TILE, TILE);
+          if (v === 2) {
+            ctx.fillStyle = "#303438";
+            ctx.fillRect(ppx + 5, ppy + 8, 2, 1);
+          }
+        }
+      }
+    }
+    drawExitMarkers(r, cam);
+  }
+
+  function exitFacing(e, r) {
+    if (e.x <= 1) return "left";
+    if (e.x >= r.w - 2) return "right";
+    if (e.y <= 1) return "up";
+    return "down";
+  }
+
+  function drawExitChevron(cx, cy, dir, color, scale) {
+    const s = scale || 1;
+    ctx.fillStyle = color;
+    if (dir === "right") {
+      ctx.fillRect(cx, cy - 3 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx + 2 * s, cy - 2 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx + 4 * s, cy - 1 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx + 2 * s, cy, 2 * s, 2 * s);
+      ctx.fillRect(cx, cy + 1 * s, 2 * s, 2 * s);
+    } else if (dir === "left") {
+      ctx.fillRect(cx + 4 * s, cy - 3 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx + 2 * s, cy - 2 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx, cy - 1 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx + 2 * s, cy, 2 * s, 2 * s);
+      ctx.fillRect(cx + 4 * s, cy + 1 * s, 2 * s, 2 * s);
+    } else if (dir === "up") {
+      ctx.fillRect(cx - 3 * s, cy + 4 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx - 2 * s, cy + 2 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx - 1 * s, cy, 2 * s, 2 * s);
+      ctx.fillRect(cx, cy + 2 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx + 1 * s, cy + 4 * s, 2 * s, 2 * s);
+    } else {
+      ctx.fillRect(cx - 3 * s, cy, 2 * s, 2 * s);
+      ctx.fillRect(cx - 2 * s, cy + 2 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx - 1 * s, cy + 4 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx, cy + 2 * s, 2 * s, 2 * s);
+      ctx.fillRect(cx + 1 * s, cy, 2 * s, 2 * s);
+    }
+  }
+
+  function drawExitMarkers(r, cam) {
+    const pulse = 0.5 + 0.5 * Math.sin(state.tick * 0.14);
+    const pulse2 = 0.5 + 0.5 * Math.sin(state.tick * 0.14 + 1.2);
+    r.exits.forEach(e => {
+      const open = !e.need || e.need();
+      const ex = e.x * TILE - cam.x, ey = e.y * TILE - cam.y;
+      const ew = Math.max(e.w * TILE, TILE), eh = Math.max(e.h * TILE, TILE);
+      const dir = exitFacing(e, r);
+      const glowA = open ? (0.28 + 0.32 * pulse) : 0.4;
+      const mat = open ? `rgba(110,210,130,${glowA})` : `rgba(170,55,55,0.45)`;
+      const matHi = open ? `rgba(210,255,190,${0.2 + 0.35 * pulse2})` : "rgba(255,140,120,0.25)";
+      const frameLite = open ? "#d8f0b0" : "#d08080";
+      const frameMid = open ? "#6a9a58" : "#8a4040";
+      const frameDark = open ? "#1a3020" : "#301010";
+
+      /* outer glow pad (bigger than tile) */
+      ctx.fillStyle = open ? `rgba(80,180,100,${0.12 + 0.12 * pulse})` : "rgba(160,40,40,0.18)";
+      ctx.fillRect(ex - 3, ey - 3, ew + 6, eh + 6);
+
+      /* bright floor mat / portal slab */
+      ctx.fillStyle = mat;
+      ctx.fillRect(ex, ey, ew, eh);
+      ctx.fillStyle = matHi;
+      for (let ix = 0; ix < ew; ix += 4) {
+        for (let iy = 0; iy < eh; iy += 4) {
+          if (((ix + iy) >> 2) % 2 === 0) ctx.fillRect(ex + ix, ey + iy, 3, 3);
+        }
+      }
+
+      /* thick door frame */
+      ctx.fillStyle = frameDark;
+      ctx.fillRect(ex - 2, ey - 2, ew + 4, 3);
+      ctx.fillRect(ex - 2, ey + eh - 1, ew + 4, 3);
+      ctx.fillRect(ex - 2, ey - 2, 3, eh + 4);
+      ctx.fillRect(ex + ew - 1, ey - 2, 3, eh + 4);
+      ctx.fillStyle = frameLite;
+      ctx.fillRect(ex - 1, ey - 1, ew + 2, 1);
+      ctx.fillRect(ex - 1, ey - 1, 1, eh + 2);
+      ctx.fillStyle = frameMid;
+      ctx.fillRect(ex + 1, ey + 1, ew - 2, 1);
+      ctx.fillRect(ex + 1, ey + eh - 2, ew - 2, 1);
+
+      /* side jambs for vertical doors (look like doorway) */
+      if (dir === "left" || dir === "right") {
+        ctx.fillStyle = frameDark;
+        ctx.fillRect(ex + (dir === "right" ? ew - 4 : 1), ey + 2, 3, eh - 4);
+        ctx.fillStyle = open ? "#3a5a38" : "#5a2828";
+        ctx.fillRect(ex + (dir === "right" ? ew - 3 : 2), ey + 3, 1, eh - 6);
+        /* lintel bar */
+        ctx.fillStyle = frameLite;
+        ctx.fillRect(ex, ey - 4, ew, 2);
+        ctx.fillStyle = frameMid;
+        ctx.fillRect(ex + 1, ey - 5, ew - 2, 1);
+      } else {
+        /* top/bottom portal — threshold planks */
+        ctx.fillStyle = frameDark;
+        for (let i = 0; i < ew; i += 4) ctx.fillRect(ex + i, ey + (dir === "down" ? eh - 5 : 2), 3, 3);
+        ctx.fillStyle = frameLite;
+        ctx.fillRect(ex - 1, ey + (dir === "down" ? eh : -3), ew + 2, 2);
+      }
+
+      /* pulsing edge pips */
+      ctx.fillStyle = open ? `rgba(230,255,200,${0.55 + 0.45 * pulse})` : "#c06060";
+      const pip = 2 + (pulse > 0.7 ? 1 : 0);
+      if (dir === "right") {
+        ctx.fillRect(ex + ew + 1, ey + (eh >> 1) - 1, pip + 1, 3);
+        ctx.fillRect(ex + ew + 3, ey + (eh >> 1) - 3, pip, 2);
+        ctx.fillRect(ex + ew + 3, ey + (eh >> 1) + 2, pip, 2);
+      } else if (dir === "left") {
+        ctx.fillRect(ex - pip - 2, ey + (eh >> 1) - 1, pip + 1, 3);
+        ctx.fillRect(ex - pip - 3, ey + (eh >> 1) - 3, pip, 2);
+        ctx.fillRect(ex - pip - 3, ey + (eh >> 1) + 2, pip, 2);
+      } else if (dir === "up") {
+        ctx.fillRect(ex + (ew >> 1) - 1, ey - pip - 2, 3, pip + 1);
+      } else {
+        ctx.fillRect(ex + (ew >> 1) - 1, ey + eh + 1, 3, pip + 1);
+      }
+
+      /* chevron arrows (double for open) */
+      const ax = ex + (ew >> 1);
+      const ay = ey + (eh >> 1);
+      const col = open ? (pulse > 0.55 ? "#f0ffe0" : "#b8e090") : "#e09090";
+      const col2 = open ? "#2a4a28" : "#401818";
+      let ox = 0, oy = 0;
+      if (dir === "right") ox = (ew >> 1) + 2;
+      else if (dir === "left") ox = -(ew >> 1) - 8;
+      else if (dir === "up") oy = -(eh >> 1) - 8;
+      else oy = (eh >> 1) + 2;
+      drawExitChevron(ax + ox, ay + oy, dir, col2, 1);
+      drawExitChevron(ax + ox + (dir === "left" || dir === "right" ? 0 : 0), ay + oy + (dir === "up" || dir === "down" ? 0 : 0), dir, col, 1);
+      if (open && pulse > 0.6) {
+        const ox2 = ox + (dir === "right" ? 5 : dir === "left" ? -5 : 0);
+        const oy2 = oy + (dir === "down" ? 5 : dir === "up" ? -5 : 0);
+        drawExitChevron(ax + ox2, ay + oy2, dir, col, 1);
+      }
+
+      /* tiny destination crumb label (pixel bar, not full HUD) */
+      if (open && e.to && rooms[e.to]) {
+        const labelY = ey - 9;
+        const lw = Math.min(ew + 10, 36);
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.fillRect(ex + (ew - lw) / 2, labelY, lw, 6);
+        ctx.fillStyle = pulse > 0.5 ? "#c8e8a8" : "#8aba70";
+        ctx.fillRect(ex + (ew - lw) / 2 + 1, labelY + 1, lw - 2, 1);
+        ctx.fillRect(ex + (ew - lw) / 2 + 1, labelY + 4, lw - 2, 1);
+        /* three pixel "light" dots as exit beacon */
+        ctx.fillStyle = "#e8ffc0";
+        const mid = ex + (ew >> 1);
+        ctx.fillRect(mid - 3, labelY + 2, 1, 1);
+        ctx.fillRect(mid, labelY + 2, 2, 1);
+        ctx.fillRect(mid + 4, labelY + 2, 1, 1);
+      }
+    });
+  }
+
+  /* Old-school RPG idle: discrete 1px bob + optional sway, staggered per seed (no strobe) */
+  function npcIdleOffset(seed) {
+    const t = state.tick + seed * 19;
+    const s = Math.sin(t / (20 + (seed % 9)));
+    const bob = s > 0.42 ? -1 : (s < -0.42 ? 1 : 0);
+    const sw = Math.sin((t + 37) / (27 + (seed % 6)));
+    let sway = sw > 0.55 ? 1 : 0;
+    /* rare head twitch */
+    if (((state.tick + seed * 7) % 97) < 3) sway += (seed % 2 ? 1 : -1);
+    return { bob, sway };
+  }
+
+  function drawNpcs(r, cam) {
+    r.objects.forEach(o => {
+      if (o.kind !== "npc" && o.kind !== "banter" && o.kind !== "obrien_talk"
+          && o.kind !== "obrien_square" && o.kind !== "julia_square" && o.kind !== "julia_meadow"
+          && o.kind !== "charrington_talk" && o.kind !== "julia_secret"
+          && o.kind !== "prole_oldman" && o.kind !== "miniluv_obrien") return;
+      if (o.kind === "banter") {
+        /* eavesdrop cue: always-on soft glyphs (no hard on/off — that strobed like a middle NPC) */
+        const bx = o.x * TILE - cam.x + 4;
+        const by = o.y * TILE - cam.y;
+        const a = 0.28 + 0.18 * Math.sin(state.tick / 18);
+        const bob = Math.sin(state.tick / 22) > 0.4 ? -1 : 0;
+        ctx.fillStyle = `rgba(220,200,160,${a})`;
+        ctx.fillRect(bx + 3, by + 1 + bob, 2, 2);
+        ctx.fillRect(bx + 7, by + 4 + bob, 2, 2);
+        ctx.fillRect(bx + 5, by + 7 + bob, 2, 1);
+        return;
+      }
+      const style = o.style || "clerk";
+      const seed = (o.x * 7 + o.y * 13 + (o.id ? o.id.length * 3 : 0)) | 0;
+      const { bob, sway } = npcIdleOffset(seed);
+      const ppx = o.x * TILE - cam.x + 3 + sway;
+      const ppy = o.y * TILE - cam.y + 1 + bob;
+      /* shadow stays grounded */
+      ctx.fillStyle = "rgba(0,0,0,.3)";
+      ctx.fillRect(ppx + 1 - sway, ppy + 13 - bob, 8, 2);
+
+      if (style === "kid") {
+        ctx.fillStyle = "#4a5a3a";
+        ctx.fillRect(ppx + 1, ppy + 7, 8, 6);
+        ctx.fillStyle = C.skin;
+        ctx.fillRect(ppx + 2, ppy + 3, 6, 4);
+        ctx.fillStyle = "#1a1a1a";
+        ctx.fillRect(ppx + 2, ppy + 3, 6, 2);
+        ctx.fillStyle = C.red;
+        ctx.fillRect(ppx + 7, ppy + 8, 2, 2);
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 5, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 5, 1, 1);
+        npcBlinkLids(ppx, ppy, seed, 5, C.skin);
+        return;
+      }
+      if (style === "mrs") {
+        ctx.fillStyle = "#5a4a5a";
+        ctx.fillRect(ppx, ppy + 5, 10, 8);
+        ctx.fillStyle = "#b09070";
+        ctx.fillRect(ppx + 2, ppy, 6, 5);
+        ctx.fillStyle = "#3a3030";
+        ctx.fillRect(ppx + 2, ppy, 6, 2);
+        ctx.fillStyle = "#6a5050";
+        ctx.fillRect(ppx + 3, ppy + 3, 2, 1); // smudge
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 2, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 2, 1, 1);
+        ctx.fillStyle = "#d8d0c0";
+        ctx.fillRect(ppx + 2, ppy + 7, 6, 4);
+        ctx.fillStyle = "#b0a898";
+        ctx.fillRect(ppx + 3, ppy + 8, 4, 1);
+        npcBlinkLids(ppx, ppy, seed, 2, "#b09070");
+        return;
+      }
+      if (style === "julia") {
+        ctx.fillStyle = "#2a2a38";
+        ctx.fillRect(ppx, ppy + 5, 10, 8);
+        ctx.fillStyle = C.skin;
+        ctx.fillRect(ppx + 2, ppy, 6, 5);
+        ctx.fillStyle = "#0a0a0a";
+        ctx.fillRect(ppx + 1, ppy, 8, 3);
+        ctx.fillRect(ppx + 1, ppy + 3, 2, 2);
+        ctx.fillStyle = C.red;
+        ctx.fillRect(ppx + 4, ppy + 7, 2, 2); // sash hint
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 2, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 2, 1, 1);
+        npcBlinkLids(ppx, ppy, seed, 2, C.skin);
+        return;
+      }
+      if (style === "syme") {
+        ctx.fillStyle = "#3a4a6a";
+        ctx.fillRect(ppx + 1, ppy + 5, 8, 8);
+        ctx.fillStyle = C.skin;
+        ctx.fillRect(ppx + 2, ppy, 6, 5);
+        ctx.fillStyle = "#1a1a1a";
+        ctx.fillRect(ppx + 2, ppy, 6, 2);
+        // thin face / keen eyes
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 2, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 2, 1, 1);
+        ctx.fillStyle = "#c8d0d8";
+        ctx.fillRect(ppx + 2, ppy + 2, 2, 1);
+        ctx.fillRect(ppx + 5, ppy + 2, 2, 1);
+        ctx.fillStyle = C.red;
+        ctx.fillRect(ppx + 7, ppy + 6, 2, 2);
+        npcBlinkLids(ppx, ppy, seed, 2, C.skin);
+        return;
+      }
+      if (style === "parsons") {
+        ctx.fillStyle = "#4a5a4a";
+        ctx.fillRect(ppx - 1, ppy + 5, 12, 8); // stout
+        ctx.fillStyle = "#c4a484";
+        ctx.fillRect(ppx + 2, ppy, 6, 5);
+        ctx.fillStyle = "#4a3a2a";
+        ctx.fillRect(ppx + 2, ppy, 6, 2);
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 2, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 2, 1, 1);
+        ctx.fillStyle = C.red;
+        ctx.fillRect(ppx + 8, ppy + 6, 2, 2);
+        npcBlinkLids(ppx, ppy, seed, 2, "#c4a484");
+        return;
+      }
+      if (style === "obrien") {
+        ctx.fillStyle = "#2a3040";
+        ctx.fillRect(ppx, ppy + 5, 10, 8);
+        ctx.fillStyle = C.skin;
+        ctx.fillRect(ppx + 2, ppy, 6, 5);
+        ctx.fillStyle = "#1a1a1a";
+        ctx.fillRect(ppx + 2, ppy, 6, 2);
+        // glasses
+        ctx.fillStyle = "#c8d0d8";
+        ctx.fillRect(ppx + 2, ppy + 2, 3, 2);
+        ctx.fillRect(ppx + 5, ppy + 2, 3, 2);
+        ctx.fillRect(ppx + 5, ppy + 2, 1, 1);
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 2, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 2, 1, 1);
+        ctx.fillStyle = C.red;
+        ctx.fillRect(ppx + 7, ppy + 6, 2, 2);
+        npcBlinkLids(ppx, ppy, seed, 2, C.skin);
+        return;
+      }
+      if (style === "charrington") {
+        ctx.fillStyle = "#5a5048";
+        ctx.fillRect(ppx, ppy + 5, 10, 8);
+        ctx.fillStyle = "#c4b090";
+        ctx.fillRect(ppx + 2, ppy, 6, 5);
+        ctx.fillStyle = "#d0d0d0";
+        ctx.fillRect(ppx + 2, ppy, 6, 2); // white hair
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 2, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 2, 1, 1);
+        ctx.fillStyle = "#8a7a6a";
+        ctx.fillRect(ppx + 3, ppy + 4, 4, 1); // mild smile line
+                npcBlinkLids(ppx, ppy, seed, 2, "#c4b090");
+        return;
+      }
+      if (style === "servant") {
+        ctx.fillStyle = "#2a2a32";
+        ctx.fillRect(ppx, ppy + 5, 10, 8);
+        ctx.fillStyle = "#c4a484";
+        ctx.fillRect(ppx + 2, ppy, 6, 5);
+        ctx.fillStyle = "#1a1a1a";
+        ctx.fillRect(ppx + 2, ppy, 6, 2);
+        ctx.fillStyle = C.white;
+        ctx.fillRect(ppx + 3, ppy + 6, 4, 3); // apron
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 2, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 2, 1, 1);
+                npcBlinkLids(ppx, ppy, seed, 2, "#c4a484");
+        return;
+      }
+      if (style === "ruin") {
+        ctx.fillStyle = "#3a3834";
+        ctx.fillRect(ppx, ppy + 6, 10, 7);
+        ctx.fillStyle = "#a09080";
+        ctx.fillRect(ppx + 2, ppy + 1, 6, 5);
+        ctx.fillStyle = "#2a2a2a";
+        ctx.fillRect(ppx + 2, ppy + 1, 6, 2);
+        ctx.fillStyle = "#5a4040";
+        ctx.fillRect(ppx + 4, ppy + 3, 2, 1); // bruise
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 3, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 3, 1, 1);
+        // gin glass
+        ctx.fillStyle = C.gin;
+        ctx.fillRect(ppx + 10, ppy + 8, 3, 5);
+                npcBlinkLids(ppx, ppy, seed, 3, "#a09080");
+        return;
+      }
+      if (style === "prole") {
+        ctx.fillStyle = "#4a4038";
+        ctx.fillRect(ppx - 1, ppy + 6, 12, 7);
+        ctx.fillStyle = "#b09878";
+        ctx.fillRect(ppx + 2, ppy + 1, 6, 5);
+        ctx.fillStyle = "#c8c0b0";
+        ctx.fillRect(ppx + 1, ppy + 1, 8, 2); // grey hair
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 3, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 3, 1, 1);
+        ctx.fillStyle = "#6a5a4a";
+        ctx.fillRect(ppx + 3, ppy + 5, 4, 1);
+        ctx.fillStyle = C.gin;
+        ctx.fillRect(ppx + 10, ppy + 7, 3, 5);
+                npcBlinkLids(ppx, ppy, seed, 3, "#b09878");
+        return;
+      }
+      if (style === "barmaid") {
+        ctx.fillStyle = "#5a3a3a";
+        ctx.fillRect(ppx, ppy + 5, 10, 8);
+        ctx.fillStyle = "#c4a484";
+        ctx.fillRect(ppx + 2, ppy, 6, 5);
+        ctx.fillStyle = "#3a2a2a";
+        ctx.fillRect(ppx + 2, ppy, 6, 2);
+        ctx.fillStyle = "#d8d0c0";
+        ctx.fillRect(ppx + 3, ppy + 6, 4, 4); // apron
+        ctx.fillStyle = C.black;
+        ctx.fillRect(ppx + 3, ppy + 2, 1, 1);
+        ctx.fillRect(ppx + 6, ppy + 2, 1, 1);
+                npcBlinkLids(ppx, ppy, seed, 2, "#c4a484");
+        return;
+      }
+      // default clerk / guard
+      const shirt = style === "guard" ? "#4a3a3a" : "#3a4a6a";
+      ctx.fillStyle = shirt;
+      ctx.fillRect(ppx, ppy + 5, 10, 8);
+      ctx.fillStyle = "#2a3548";
+      ctx.fillRect(ppx + 2, ppy + 5, 2, 5);
+      ctx.fillRect(ppx + 6, ppy + 5, 2, 5);
+      ctx.fillStyle = C.skin;
+      ctx.fillRect(ppx + 2, ppy, 6, 5);
+      ctx.fillStyle = C.hair;
+      ctx.fillRect(ppx + 2, ppy, 6, 2);
+      ctx.fillStyle = C.red;
+      ctx.fillRect(ppx + 7, ppy + 6, 2, 2);
+      ctx.fillStyle = C.black;
+      ctx.fillRect(ppx + 3, ppy + 2, 1, 1);
+      ctx.fillRect(ppx + 6, ppy + 2, 1, 1);
+      npcBlinkLids(ppx, ppy, seed, 2, C.skin);
+    });
+  }
+
+  function drawWatchOverlay() {
+    if (state.flags.broken) return;
+    if (state.room !== "apartment" && state.room !== "apartment2" && state.room !== "apartment_book") return;
+    if (state.paused) return;
+    if (player.moving || touch.active) {
+      drawWatchOverlay._idle = 0;
+      return;
+    }
+    drawWatchOverlay._idle = (drawWatchOverlay._idle || 0) + 1;
+    if (drawWatchOverlay._idle > 120) {
+      ctx.fillStyle = "rgba(0,0,0,.35)";
+      ctx.fillRect(0, 0, VW, VH);
+      ctx.fillStyle = C.red;
+      ctx.fillRect(VW - 78, 8, 70, 14);
+      ctx.fillStyle = "#fff";
+      ctx.font = "8px monospace";
+      ctx.fillText("你已被觀察", VW - 74, 18);
+    }
+  }
+
+  function frame() {
+    const r = room();
+    const cam = {
+      x: Math.floor(player.x + player.w / 2 - VW / 2),
+      y: Math.floor(player.y + player.h / 2 - VH / 2),
+    };
+    /* Rooms smaller than VW×VH: center; wider/taller: scroll-clamp */
+    const maxCamX = r.w * TILE - VW;
+    const maxCamY = r.h * TILE - VH;
+    cam.x = maxCamX <= 0 ? Math.floor(maxCamX / 2) : Math.max(0, Math.min(cam.x, maxCamX));
+    cam.y = maxCamY <= 0 ? Math.floor(maxCamY / 2) : Math.max(0, Math.min(cam.y, maxCamY));
+
+    ctx.fillStyle = C.black;
+    ctx.fillRect(0, 0, VW, VH);
+    drawTiles(r, cam);
+    if (r.drawExtra) r.drawExtra(ctx, cam);
+    drawNpcs(r, cam);
+    if (!state.flags.broken && state.room !== "room101") drawPlayer(cam);
+    drawWatchOverlay();
+    drawRoom101Reveal();
+    drawRoomLighting(r, cam);
+
+    const near = nearObjects();
+    state.interactNear = near;
+    const hint = document.getElementById("interact-hint");
+    if (near && !state.paused && !state.flags.broken) {
+      const nearLbl = (near.style === "julia" || (near.kind && String(near.kind).startsWith("julia")))
+        ? juliaLabel()
+        : t(near.label);
+      hint.textContent = t("E／互動 · ") + nearLbl;
+      hint.classList.remove("hidden");
+    } else hint.classList.add("hidden");
+  }
+
+  function codeToDir(code, key) {
+    if (code === "KeyA" || code === "ArrowLeft" || key === "a" || key === "A" || key === "ArrowLeft" || key === "Left") return "left";
+    if (code === "KeyD" || code === "ArrowRight" || key === "d" || key === "D" || key === "ArrowRight" || key === "Right") return "right";
+    if (code === "KeyW" || code === "ArrowUp" || key === "w" || key === "W" || key === "ArrowUp" || key === "Up") return "up";
+    if (code === "KeyS" || code === "ArrowDown" || key === "s" || key === "S" || key === "ArrowDown" || key === "Down") return "down";
+    return null;
+  }
+
+  function isInteractKey(code, key) {
+    return code === "KeyE" || code === "Space" || code === "Enter" ||
+      key === "e" || key === "E" || key === " " || key === "Enter";
+  }
+
+  function update() {
+    state.tick++;
+    if (state.flags.broken) {
+      player.moving = false;
+      return;
+    }
+    if (state.hateCut.active && state.hateCut.phase === "walk") {
+      updateHateWalk();
+      return;
+    }
+    if (state.hateCut.active) {
+      player.moving = false;
+      return;
+    }
+    if (state.room101Reveal.active) {
+      player.moving = false;
+      updateRoom101Reveal();
+      return;
+    }
+    if (state.betray.active) {
+      player.moving = false;
+      updateBetrayAnim();
+      return;
+    }
+    if (state.paused) {
+      player.moving = false;
+      return;
+    }
+    let dx = 0, dy = 0;
+    if (keys.has("left")) dx -= 1;
+    if (keys.has("right")) dx += 1;
+    if (keys.has("up")) dy -= 1;
+    if (keys.has("down")) dy += 1;
+
+    let tax = touch.ax, tay = touch.ay;
+    if (Math.abs(tax) < STICK_DEAD) tax = 0;
+    if (Math.abs(tay) < STICK_DEAD) tay = 0;
+    dx += tax; dy += tay;
+
+    if (dx || dy) {
+      const len = Math.hypot(dx, dy) || 1;
+      dx = (dx / len) * SPEED;
+      dy = (dy / len) * SPEED;
+      if (Math.abs(dx) > Math.abs(dy)) player.facing = dx < 0 ? "left" : "right";
+      else player.facing = dy < 0 ? "up" : "down";
+      let nx = player.x + dx, ny = player.y;
+      if (!collides(nx, ny)) player.x = nx;
+      nx = player.x; ny = player.y + dy;
+      if (!collides(nx, ny)) player.y = ny;
+      player.moving = true;
+      player.anim++;
+      if ((player.anim % 8) === 0) { try { Sfx.foot(); } catch (_) {} }
+      tryExits();
+    } else {
+      player.moving = false;
+    }
+  }
+
+  function loop() {
+    update();
+    frame();
+    requestAnimationFrame(loop);
+  }
+
+  function resize() {
+    /* Adapt logical VW×VH to wrap aspect, then contain-fit to fill phone */
+    const wrap = document.getElementById("game-wrap");
+    let maxW = (wrap && wrap.clientWidth) || 0;
+    let maxH = (wrap && wrap.clientHeight) || 0;
+    if (maxW < 2 || maxH < 2) {
+      maxW = window.innerWidth || VW;
+      maxH = window.innerHeight || VH;
+      try {
+        if (window.visualViewport) {
+          maxW = Math.max(maxW, window.visualViewport.width | 0);
+          maxH = Math.max(maxH, window.visualViewport.height | 0);
+        }
+      } catch (_) {}
+    }
+    maxW = Math.max(1, maxW);
+    maxH = Math.max(1, maxH);
+    const landscape = maxW >= maxH;
+    const nextW = landscape ? VW_LAND : VW_PORT;
+    const nextH = landscape ? VH_LAND : VH_PORT;
+    if (nextW !== VW || nextH !== VH) {
+      VW = nextW;
+      VH = nextH;
+      canvas.width = VW;
+      canvas.height = VH;
+      try { ctx.imageSmoothingEnabled = false; } catch (_) {}
+    }
+    const fit = Math.min(maxW / VW, maxH / VH);
+    const w = Math.max(1, Math.floor(VW * fit));
+    const h = Math.max(1, Math.floor(VH * fit));
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+  }
+
+  function scheduleResize() {
+    try { resize(); } catch (_) {}
+    try { requestAnimationFrame(() => { try { resize(); } catch (__) {} }); } catch (_) {}
+    setTimeout(() => { try { resize(); } catch (_) {} }, 50);
+    setTimeout(() => { try { resize(); } catch (_) {} }, 250);
+    setTimeout(() => { try { resize(); } catch (_) {} }, 800);
+  }
+
+  window.addEventListener("keydown", e => {
+    if (state.flags.broken) { e.preventDefault(); return; }
+    const dir = codeToDir(e.code, e.key);
+    if (dir) {
+      keys.add(dir);
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code) || e.key === " ") {
+        e.preventDefault();
+      }
+    }
+    if (isInteractKey(e.code, e.key)) {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (tryAdvanceDialogue()) return;
+      if (!state.paused) interact();
+    }
+  });
+  window.addEventListener("keyup", e => {
+    const dir = codeToDir(e.code, e.key);
+    if (dir) keys.delete(dir);
+  });
+
+  function clearAllInput() { clearMovement(); }
+  window.addEventListener("blur", clearAllInput);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) clearAllInput();
+  });
+
+  const stick = document.getElementById("stick");
+  const knob = document.getElementById("knob");
+  const touchRoot = document.getElementById("touch");
+  touchRoot.classList.add("on");
+
+  function stickAt(clientX, clientY) {
+    if (state.flags.broken) return;
+    const rect = stick.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    let dx = clientX - cx, dy = clientY - cy;
+    const max = rect.width * 0.38;
+    const len = Math.hypot(dx, dy);
+    if (len > max) { dx = dx / len * max; dy = dy / len * max; }
+    knob.style.transform = `translate(${dx}px,${dy}px)`;
+    touch.ax = dx / max;
+    touch.ay = dy / max;
+    touch.active = true;
+  }
+  function stickEnd() {
+    knob.style.transform = "translate(0,0)";
+    touch.ax = touch.ay = 0;
+    touch.active = false;
+  }
+  stick.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    if (state.flags.broken) return;
+    stick.setPointerCapture(e.pointerId);
+    touch.active = true;
+    stickAt(e.clientX, e.clientY);
+  });
+  stick.addEventListener("pointermove", e => {
+    if (!touch.active || state.flags.broken) return;
+    e.preventDefault();
+    stickAt(e.clientX, e.clientY);
+  });
+  stick.addEventListener("pointerup", e => { e.preventDefault(); stickEnd(); });
+  stick.addEventListener("pointercancel", e => { e.preventDefault(); stickEnd(); });
+  stick.addEventListener("lostpointercapture", stickEnd);
+
+
+  const btnInteract = document.getElementById("btn-interact");
+  let interactLock = false;
+  btnInteract.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    if (state.flags.broken) return;
+    if (tryAdvanceDialogue()) return;
+    if (interactLock || state.paused) return;
+    interactLock = true;
+    interact();
+  });
+  btnInteract.addEventListener("pointerup", () => { interactLock = false; });
+  btnInteract.addEventListener("pointercancel", () => { interactLock = false; });
+
+  canvas.addEventListener("pointerdown", e => { e.preventDefault(); });
+
+  function ensureSceneFade() {
+    let el = document.getElementById("scene-fade");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "scene-fade";
+      el.setAttribute("aria-hidden", "true");
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  function sceneFadeToBlack(then) {
+    const el = ensureSceneFade();
+    el.classList.remove("out", "in");
+    el.classList.add("on");
+    void el.offsetWidth;
+    requestAnimationFrame(() => { el.classList.add("in"); });
+    let fired = false;
+    const done = () => {
+      if (fired) return;
+      fired = true;
+      el.removeEventListener("transitionend", done);
+      if (typeof then === "function") then();
+    };
+    el.addEventListener("transitionend", done);
+    setTimeout(done, 1300);
+  }
+
+  function sceneFadeFromBlack(then) {
+    const el = ensureSceneFade();
+    el.classList.add("on", "in");
+    void el.offsetWidth;
+    requestAnimationFrame(() => {
+      el.classList.remove("in");
+      el.classList.add("out");
+    });
+    const finish = () => {
+      el.classList.remove("on", "out", "in");
+      if (typeof then === "function") then();
+    };
+    setTimeout(finish, 1600);
+  }
+
+  document.getElementById("btn-start").onclick = () => {
+    sceneFadeToBlack(() => {
+      resetDay(false);
+      state.name = "溫斯頓";
+      document.getElementById("boot").classList.remove("active");
+      toast("勝利大廈 · 房間");
+      try {
+        if (!Music.started) Music.start();
+        else if (Music.ctx && Music.ctx.state === "suspended") Music.ctx.resume();
+        Music.setScene(state.room);
+      } catch (_) {}
+      try { scheduleResize(); } catch (_) {}
+      /* brief black hold, then reveal apartment */
+      setTimeout(() => {
+        sceneFadeFromBlack();
+        try { scheduleResize(); } catch (_) {}
+      }, 350);
+    });
+  };
+
+  const bindMute = (id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        const bootEl = document.getElementById("boot");
+        if (bootEl && bootEl.classList.contains("active") && !Music.started) {
+          Music.scene = "title";
+        }
+        Music.toggleMute();
+      } catch (_) {}
+    };
+  };
+  bindMute("btn-music");
+  bindMute("btn-music-title");
+
+  const bindLang = (id, lang) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setLanguage(lang);
+      try { Sfx.click(); } catch (_) {}
+    };
+  };
+  bindLang("btn-lang-zh", "zh");
+  bindLang("btn-lang-en", "en");
+  const hudLangBtn = document.getElementById("btn-lang");
+  if (hudLangBtn) {
+    hudLangBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setLanguage(state.lang === "en" ? "zh" : "en");
+      try { Sfx.click(); } catch (_) {}
+    };
+  }
+  try { applyLanguage(); } catch (_) {}
+  /* Unlock WebAudio on first gesture; start title BGM while boot is up */
+  const unlockAudio = () => {
+    try {
+      const bootEl = document.getElementById("boot");
+      const onTitle = !!(bootEl && bootEl.classList.contains("active"));
+      if (!Music.started) {
+        if (onTitle) Music.scene = "title";
+        Music.start();
+      } else if (Music.ctx && Music.ctx.state === "suspended") {
+        Music.ctx.resume();
+      }
+    } catch (_) {}
+  };
+  document.addEventListener("pointerdown", unlockAudio, { capture: true, passive: true });
+  document.addEventListener("keydown", unlockAudio);
+
+  /* Retro UI click on any button press / animated press */
+  document.addEventListener("pointerdown", (e) => {
+    const btn = e.target && e.target.closest && e.target.closest("button");
+    if (!btn) return;
+    if (btn.disabled) return;
+    try { Sfx.click(); } catch (_) {}
+  }, true);
+
+  if (state.flags.broken) {
+    document.getElementById("boot").classList.remove("active");
+    lockForever();
+  }
+
+  window.addEventListener("resize", resize);
+  window.addEventListener("orientationchange", scheduleResize);
+  try {
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", resize);
+      window.visualViewport.addEventListener("scroll", resize);
+    }
+  } catch (_) {}
+  scheduleResize();
+  ctx.imageSmoothingEnabled = false;
+  updateQuest();
+  loop();
+})();
